@@ -6,6 +6,7 @@
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
+    "share": "node scripts/share.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx tests/domain.test.ts",
     "test:db": "node --import tsx scripts/test-db.ts",

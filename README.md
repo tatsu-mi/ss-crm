@@ -18,6 +18,26 @@ http://localhost:3000 を開きます。Supabaseの公開接続情報が両方�
 
 デモモードではチーム共有や画面を閉じている間の通知処理は行いません。Supabase接続後はDBのデータを表示し、デモデータを自動送信しません。
 
+## Quick Tunnelで一時公開
+
+Linux・macOS・WSLで利用できます。Node.js 22以上と[cloudflared](https://developers.cloudflare.com/tunnel/downloads/)をインストールし、初回は`npm ci`を実行してください。Supabaseを使う場合は、下記の手順で`.env.local`とDBを準備します。
+
+```bash
+npm run share
+```
+
+毎回本番ビルドを作成し、CRMを`127.0.0.1:3000`で起動してからQuick Tunnelを開始します。ログに表示される`https://….trycloudflare.com`が公開URLです。Cloudflareアカウント・ドメイン購入は不要で、既存のcloudflared設定ファイルも変更しません。Ctrl+Cでアプリとトンネルの両方を停止します。
+
+3000番ポートが使用中なら、別のポートを指定できます。
+
+```bash
+PORT=3001 npm run share
+```
+
+URLは起動ごとに変わり、PCのスリープやプロセス終了でアクセスできなくなります。Quick Tunnelは一時共有用で、稼働時間の保証はありません。URLを知っている人はログイン画面（デモモードならデモ画面）へアクセスできます。デモモードのデータはブラウザごとの保存で、共有されません。Supabase接続情報を変更した場合も、`npm run share`を起動し直してください。
+
+ローカル実行では`vercel.json`のCronは動きません。定期通知が必要なら、別途スケジューラーから`CRON_SECRET`のBearer認証付きで`/api/cron/reminders`を呼び出します。
+
 ## Supabaseの準備
 
 空のSupabaseプロジェクトを用意してください。開発中のスキーマ変更は初期マイグレーション1本に反映します。
