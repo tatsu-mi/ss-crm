@@ -51,16 +51,18 @@ export async function authenticatedClient(request: Request) {
 }
 export async function loadWorkspace(db: SupabaseClient): Promise<Workspace> {
   const tables: [keyof Workspace, string][] = [
+    ["activity_templates", "activity_templates"],
     ["customers", "customers"],
     ["engineers", "engineers"],
     ["customer_contacts", "customer_contacts"],
     ["customer_engineer_relations", "customer_engineer_relations"],
     ["projects", "projects"],
     ["deals", "deals"],
-    ["contracts", "contracts"],
+    ["project_engineers", "project_engineers"],
     ["contract_periods", "contract_periods"],
     ["activities", "activities"],
     ["tasks", "tasks"],
+    ["activity_relations", "activity_relations"],
     ["activity_contacts", "activity_contacts"],
     ["activity_engineers", "activity_engineers"],
     ["activity_kinds", "activity_kinds"],
@@ -89,12 +91,22 @@ export async function loadWorkspace(db: SupabaseClient): Promise<Workspace> {
             ].join(",")
           : "*";
         let query = db.from(table).select(selection);
-        if (table === "activity_contacts" || table === "activity_engineers") {
+        if (
+          table === "activity_contacts" ||
+          table === "activity_engineers" ||
+          table === "activity_relations"
+        ) {
           query = query
             .order("activity_id")
             .order(
-              table === "activity_contacts" ? "contact_id" : "engineer_id",
+              table === "activity_contacts"
+                ? "contact_id"
+                : table === "activity_relations"
+                  ? "related_activity_id"
+                  : "engineer_id",
             );
+        } else if (table === "activity_kinds") {
+          query = query.order("display_order").order("id");
         } else query = query.order("id");
         const { data, error } = await query.range(offset, offset + 999);
         if (error)
@@ -108,13 +120,14 @@ export async function loadWorkspace(db: SupabaseClient): Promise<Workspace> {
     }),
   );
   for (const table of [
+    "activity_templates",
     "customers",
     "engineers",
     "customer_contacts",
     "customer_engineer_relations",
     "projects",
     "deals",
-    "contracts",
+    "project_engineers",
     "contract_periods",
     "activities",
     "tasks",

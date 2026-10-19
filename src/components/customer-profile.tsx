@@ -1,10 +1,9 @@
 "use client";
-import { FileText, Plus } from "lucide-react";
+import { FileText } from "lucide-react";
 import { Base, Workspace } from "@/lib/model";
 import { display, Input } from "@/lib/forms";
 import { fieldOf, referenceChoices, SaveCell } from "@/lib/sheet-columns";
 import { Spreadsheet, SheetColumn } from "./spreadsheet";
-import { BusinessTable } from "./business-table";
 interface ProfileLine {
   id: string;
   left: Input;
@@ -14,14 +13,10 @@ export function CustomerProfile({
   w,
   customer,
   save,
-  onEdit,
-  onAddContact,
 }: {
   w: Workspace;
   customer: Base;
   save: SaveCell;
-  onEdit: (x: { table: "customer_contacts"; row: Base }) => void;
-  onAddContact: () => void;
 }) {
   const pairs = [
     ["name", "name_kana"],
@@ -87,36 +82,6 @@ export function CustomerProfile({
         columns={columns}
         rowLabel={() => String(customer.name)}
         hideHeader
-      />
-      <div className="mock-section-heading">
-        <FileText size={16} />
-        <h3>
-          担当者（
-          {
-            w.customer_contacts.filter(
-              (c) => c.customer_id === customer.id && !c.archived_at,
-            ).length
-          }
-          名）
-        </h3>
-        <button className="button primary" onClick={onAddContact}>
-          <Plus size={14} />
-          担当者を追加
-        </button>
-      </div>
-      <BusinessTable
-        w={w}
-        table="customer_contacts"
-        data={w.customer_contacts.filter(
-          (c) => c.customer_id === customer.id && !c.archived_at,
-        )}
-        onEdit={
-          onEdit as (x: {
-            table: import("@/lib/model").Table;
-            row: Base;
-          }) => void
-        }
-        saveCell={save}
       />
     </>
   );

@@ -9,7 +9,7 @@ export function Login({ error: initialError }: { error: string }) {
     <main className="login">
       <section className="login-story">
         <div className="brand">
-          <Network size={24} /> NEXUS <span>SES CRM</span>
+          <Network size={24} /> Tatsumi SS <span>CRM</span>
         </div>
         <div>
           <span className="eyebrow">PEOPLE & POSSIBILITIES</span>

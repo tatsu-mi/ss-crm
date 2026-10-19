@@ -44,9 +44,11 @@ export function referenceChoices(
       target.id,
       "display_name" in target
         ? String(target.display_name)
-        : field.ref === "customer_engineer_relations"
-          ? `${w.engineers.find((e) => e.id === (target as Base).engineer_id)?.name || "エンジニア"} / ${(target as Base).label}`
-          : titleOf(target as Base),
+        : field.ref === "project_engineers"
+          ? display(w, field, target.id)
+          : field.ref === "customer_engineer_relations"
+            ? `${w.engineers.find((e) => e.id === (target as Base).engineer_id)?.name || "エンジニア"} / ${(target as Base).label}`
+            : titleOf(target as Base),
     ]);
 }
 export function standardColumn(

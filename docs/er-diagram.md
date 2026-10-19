@@ -1,6 +1,6 @@
 # SES向けCRM ER図
 
-顧客・エンジニア・顧客側担当者・案件・商談・契約・契約期間・活動・タスクは、それぞれ通常のテーブルで管理する。名前・日付・金額・状態・担当者などの標準項目は列に持ち、関連は外部キーで表す。今後の機能追加は、業務ごとのテーブルに必要な列や関連テーブルを追加して対応する。
+顧客・エンジニア・担当者・契約・商談・参画エンジニア・契約期間・活動・タスクは、それぞれ通常のテーブルで管理する。名前・日付・金額・状態・担当者などの標準項目は列に持ち、関連は外部キーで表す。今後の機能追加は、業務ごとのテーブルに必要な列や関連テーブルを追加して対応する。
 
 本図は専用テーブルで構成したアプリ・新規導入用マイグレーションの論理モデル。既存の[ADR](adr/)は旧設計の記録として残しており、本図と一致しない箇所がある。利用目的は[ユーザーストーリー](user-stories.md)を参照する。
 
@@ -8,15 +8,15 @@
 
 線のラベルは`外部キー → 参照先の主キー`をフィールド名だけで示す。
 
-## 顧客・エンジニア・顧客側担当者
+## 顧客・エンジニア・担当者
 
-顧客の住所や営業担当、エンジニアの希望条件も、それぞれのテーブルに直接保存する。「基本情報」のために別の記録を作る必要はない。
+顧客の住所や営業、エンジニアの希望条件も、それぞれのテーブルに直接保存する。「基本情報」のために別の記録を作る必要はない。
 
 ```mermaid
 erDiagram
     APP_USER["APP_USER（利用者）"]
     CUSTOMER["CUSTOMER（顧客）"]
-    CUSTOMER_CONTACT["CUSTOMER_CONTACT（顧客側担当者）"]
+    CUSTOMER_CONTACT["CUSTOMER_CONTACT（担当者）"]
     CUSTOMER_ENGINEER_RELATION["CUSTOMER_ENGINEER_RELATION（参画関係）"]
     ENGINEER["ENGINEER（エンジニア）"]
 
@@ -37,7 +37,7 @@ erDiagram
         string address "所在地"
         string industry "業種"
         string trade_status "取引状況"
-        uuid sales_user_id FK "自社営業担当ID"
+        uuid sales_user_id FK "営業ID"
         text notes "備考"
         datetime archived_at "保管日時"
     }
@@ -48,7 +48,7 @@ erDiagram
         datetime archived_at "保管日時"
     }
     CUSTOMER_CONTACT {
-        uuid id PK "顧客側担当者ID"
+        uuid id PK "担当者ID"
         uuid customer_id FK "顧客ID"
         string name "氏名"
         string department "部署"
@@ -72,51 +72,67 @@ erDiagram
     }
 ```
 
-参画関係は「青空システムへの山田さんの提案から参画まで」のような接点を表す。同じ顧客とエンジニアでも別案件への提案には別の関係を作れるため、両IDの組み合わせは一意にしない。契約更新では同じ関係を使う。顧客側担当者と、自社のログイン利用者である`APP_USER`は区別する。
+参画関係は「青空システムへの山田さんの提案から参画まで」のような接点を表す。同じ顧客とエンジニアでも別契約への提案には別の関係を作れるため、両IDの組み合わせは一意にしない。契約への紐づけは参画エンジニアで管理し、参画関係は商談の候補を表す。担当者と、自社のログイン利用者である`APP_USER`は区別する。
 
-## 案件・商談・契約・契約期間
+## 契約・エンジニア・契約期間
 
-案件は募集内容、商談は提案と受注までの進捗、契約は継続する契約の単位、契約期間は期間ごとの条件を保持する。
+契約を管理単位とし、1契約につき1人のエンジニアを紐づける。1件の契約（契約）に紐づけるエンジニアは1人とする。複数人が同じ内容で参画する場合は、契約を複製して1人ずつ登録する。参画期間・請求単価・原価はエンジニアごとに管理する。上部の「担当者」「商談」は設けず、担当者は取引先詳細、商談は活動の種別から確認する。登録済み全エンジニアの管理は上部の「エンジニア」、顧客の契約に紐づくエンジニアと期間の確認は取引先詳細の「参画エンジニア」で行う。
 
 ```mermaid
 erDiagram
     CUSTOMER["CUSTOMER（顧客）"]
-    PROJECT["PROJECT（案件）"]
-    DEAL["DEAL（商談）"]
-    CUSTOMER_ENGINEER_RELATION["CUSTOMER_ENGINEER_RELATION（参画関係）"]
-    APP_USER["APP_USER（利用者）"]
     CONTRACT["CONTRACT（契約）"]
+    ENGINEER["ENGINEER（エンジニア）"]
+    CONTRACT_ENGINEER["CONTRACT_ENGINEER（参画エンジニア）"]
     CONTRACT_PERIOD["CONTRACT_PERIOD（契約期間）"]
+    APP_USER["APP_USER（利用者）"]
+    DEAL["DEAL（商談）"]
+    CUSTOMER_ENGINEER_RELATION["CUSTOMER_ENGINEER_RELATION（商談候補の参画関係）"]
 
-    CUSTOMER ||--o{ PROJECT : "customer_id → id"
+    CUSTOMER ||--o{ CONTRACT : "customer_id → id"
+    APP_USER o|--o{ CONTRACT : "sales_user_id → id"
+    CONTRACT ||--o| CONTRACT_ENGINEER : "project_id → id（有効な紐づけ）"
+    ENGINEER ||--o{ CONTRACT_ENGINEER : "engineer_id → id"
+    CONTRACT_ENGINEER ||--o{ CONTRACT_PERIOD : "project_engineer_id → id"
     CUSTOMER ||--o{ DEAL : "customer_id → id"
-    PROJECT o|--o{ DEAL : "project_id → id"
+    CONTRACT o|--o{ DEAL : "project_id → id"
     CUSTOMER_ENGINEER_RELATION o|--o{ DEAL : "relation_id → id"
     APP_USER o|--o{ DEAL : "sales_user_id → id"
-    CUSTOMER_ENGINEER_RELATION ||--o{ CONTRACT : "relation_id → id"
-    PROJECT o|--o{ CONTRACT : "project_id → id"
-    DEAL o|--o{ CONTRACT : "deal_id → id"
-    APP_USER o|--o{ CONTRACT : "sales_user_id → id"
-    CONTRACT ||--o{ CONTRACT_PERIOD : "contract_id → id"
 
-    PROJECT {
-        uuid id PK "案件ID"
+    CONTRACT {
+        uuid id PK "契約ID"
         uuid customer_id FK "顧客ID"
-        string name "案件名"
+        uuid sales_user_id FK "営業ID"
+        string name "契約名"
         text description "概要"
         text required_skills "必要スキル"
-        integer headcount "募集人数"
         decimal budget "希望単価"
         date planned_start_on "参画予定日"
-        string recruitment_status "募集状態"
+        datetime deleted_at "論理削除日時"
+    }
+    CONTRACT_ENGINEER {
+        uuid id PK "参画エンジニアID"
+        uuid project_id FK "契約ID"
+        uuid engineer_id FK "エンジニアID"
+        datetime deleted_at "紐づけ解除日時"
+    }
+    CONTRACT_PERIOD {
+        uuid id PK "契約期間ID"
+        uuid project_engineer_id FK "参画エンジニアID"
+        date starts_on "開始日"
+        date ends_on "終了日"
+        decimal billing_rate "請求単価"
+        decimal cost "原価"
+        string renewal_status "更新確認状態"
+        text notes "備考"
         datetime deleted_at "論理削除日時"
     }
     DEAL {
         uuid id PK "商談ID"
         uuid customer_id FK "顧客ID"
-        uuid project_id FK "案件ID"
+        uuid project_id FK "契約ID"
         uuid relation_id FK "候補の参画関係ID"
-        uuid sales_user_id FK "自社営業担当ID"
+        uuid sales_user_id FK "営業ID"
         string title "商談名"
         string stage "進捗段階"
         decimal probability "受注確度"
@@ -126,51 +142,32 @@ erDiagram
         date planned_end_on "参画予定終了日"
         datetime deleted_at "論理削除日時"
     }
-    CONTRACT {
-        uuid id PK "契約ID"
-        uuid relation_id FK "参画関係ID"
-        uuid project_id FK "案件ID"
-        uuid deal_id FK "受注商談ID"
-        uuid sales_user_id FK "自社営業担当ID"
-        string name "契約名"
-        datetime deleted_at "論理削除日時"
-    }
-    CONTRACT_PERIOD {
-        uuid id PK "契約期間ID"
-        uuid contract_id FK "契約ID"
-        date starts_on "開始日"
-        date ends_on "終了日"
-        decimal billing_rate "請求単価"
-        decimal cost "原価"
-        string renewal_status "更新確認状態"
-        text notes "備考"
-        datetime deleted_at "論理削除日時"
-    }
 ```
 
-- 案件と商談は必ず顧客に属する。商談の案件・候補は未定でもよい。候補決定時に参画関係を作り、`DEAL.relation_id`へ設定する。
-- 契約は必ず参画関係に属する。顧客とエンジニアはそこから取得する。案件・受注商談は必要に応じて関連付ける。
-- 商談・案件・参画関係・契約を結ぶときは顧客が一致することを検証する。受注商談に候補が設定済みなら、契約の参画関係とも一致させる。
-- 契約期間には開始日・終了日・請求単価・原価を持たせる。開始日≦終了日、金額は0以上、同一契約の有効な期間は重複不可とする。未入力と0は区別する。
-- 契約更新では`CONTRACT_PERIOD`を追加する。過去の期間や単価を上書きしない。契約の開始前・契約中・終了済みは期間から判断する。
-- 受注確度は0〜100の範囲で扱う。標準の状態値は業務側の列として検証し、自動処理もその列を直接読む。
+- 1契約につき有効な参画エンジニアは最大1人とし、未定（0人）でもよい。同じエンジニアが複数の契約に属することは可能。紐づけ変更前の行は解除済みの履歴として残す。
+- エンジニアの紐づけは契約本体と同時に保存し、履歴に残す。紐づけを解除しても契約期間や過去の条件は削除しない。再度紐づける際は同じ参画エンジニアIDを復元する。
+- 契約期間には開始日・終了日・請求単価・原価を持たせる。開始日≦終了日、金額は0以上、同一参画エンジニアの有効な期間は重複不可とする。別エンジニアの期間は重なってよい。
+- 契約複製では契約の標準項目と最新の有効な契約期間を下書きにコピーし、エンジニアや条件を変更してから一括保存する。活動・タスク・過去の期間・変更履歴はコピーしない。
+- 更新時は同じ参画エンジニアに契約期間を追加し、過去の期間や単価を上書きしない。営業と更新通知の担当は契約から取得する。
+- 商談の契約・候補は任意とする。候補の商談ステータスによって契約登録やエンジニアの紐づけを制限しない。関連付ける顧客は一致させる。
 
 ## 活動・タスク・通知
 
-活動とタスクは必ず顧客に属する。案件・商談・契約などへの任意の外部キーで関連付け、同じ内容を関連先ごとに複製しない。活動の参加者は複数人を登録できる。
+活動とタスクは必ず顧客に属する。活動は契約への任意の外部キーと関連活動で関連付ける。商談の活動も関連活動から選択し、活動に専用の商談IDは持たせない。タスクは契約・商談などへの任意の外部キーで関連付け、同じ内容を関連先ごとに複製しない。活動には顧客側の参加担当者と、関連するエンジニアをそれぞれ複数人登録できる。エンジニアは活動への参加有無にかかわらず紐づけでき、契約の指定や顧客との参画関係の登録は必須としない。
 
 ```mermaid
 erDiagram
     CUSTOMER["CUSTOMER（顧客）"]
     ACTIVITY["ACTIVITY（活動）"]
     ACTIVITY_KIND["ACTIVITY_KIND（活動種別）"]
+    ACTIVITY_TEMPLATE["ACTIVITY_TEMPLATE（活動テンプレート）"]
     APP_USER["APP_USER（利用者）"]
-    PROJECT["PROJECT（案件）"]
-    DEAL["DEAL（商談）"]
     CONTRACT["CONTRACT（契約）"]
-    ACTIVITY_CONTACT["ACTIVITY_CONTACT（活動の参加顧客側担当者）"]
-    CUSTOMER_CONTACT["CUSTOMER_CONTACT（顧客側担当者）"]
-    ACTIVITY_ENGINEER["ACTIVITY_ENGINEER（活動の参加エンジニア）"]
+    DEAL["DEAL（商談）"]
+    ACTIVITY_RELATION["ACTIVITY_RELATION（関連活動）"]
+    ACTIVITY_CONTACT["ACTIVITY_CONTACT（活動の参加担当者）"]
+    CUSTOMER_CONTACT["CUSTOMER_CONTACT（担当者）"]
+    ACTIVITY_ENGINEER["ACTIVITY_ENGINEER（活動の関連エンジニア）"]
     ENGINEER["ENGINEER（エンジニア）"]
     TASK["TASK（タスク）"]
     CONTRACT_PERIOD["CONTRACT_PERIOD（契約期間）"]
@@ -179,24 +176,32 @@ erDiagram
     CUSTOMER ||--o{ ACTIVITY : "customer_id → id"
     ACTIVITY_KIND ||--o{ ACTIVITY : "activity_kind_id → id"
     APP_USER ||--o{ ACTIVITY : "recorded_by → id"
-    PROJECT o|--o{ ACTIVITY : "project_id → id"
-    DEAL o|--o{ ACTIVITY : "deal_id → id"
-    CONTRACT o|--o{ ACTIVITY : "contract_id → id"
+    CONTRACT o|--o{ ACTIVITY : "project_id → id"
+    ACTIVITY ||--o{ ACTIVITY_RELATION : "activity_id → id"
+    ACTIVITY ||--o{ ACTIVITY_RELATION : "related_activity_id → id"
     ACTIVITY ||--o{ ACTIVITY_CONTACT : "activity_id → id"
     CUSTOMER_CONTACT ||--o{ ACTIVITY_CONTACT : "contact_id → id"
     ACTIVITY ||--o{ ACTIVITY_ENGINEER : "activity_id → id"
     ENGINEER ||--o{ ACTIVITY_ENGINEER : "engineer_id → id"
     CUSTOMER ||--o{ TASK : "customer_id → id"
     APP_USER o|--o{ TASK : "assignee_user_id → id"
-    PROJECT o|--o{ TASK : "project_id → id"
+    CONTRACT o|--o{ TASK : "project_id → id"
     DEAL o|--o{ TASK : "deal_id → id"
-    CONTRACT o|--o{ TASK : "contract_id → id"
     CONTRACT_PERIOD o|--o{ TASK : "contract_period_id → id"
     ACTIVITY o|--o{ TASK : "activity_id → id"
     TASK o|--o{ NOTIFICATION : "task_id → id"
     CONTRACT_PERIOD o|--o{ NOTIFICATION : "contract_period_id → id"
     APP_USER ||--o{ NOTIFICATION : "recipient_user_id → id"
 
+    ACTIVITY_TEMPLATE {
+        uuid id PK "テンプレートID"
+        integer version "版番号"
+        string name "テンプレート名"
+        text body "内容（Markdown）"
+        datetime created_at "作成日時"
+        datetime updated_at "更新日時"
+        datetime deleted_at "削除日時"
+    }
     ACTIVITY_KIND {
         uuid id PK "活動種別ID"
         string name "種別名"
@@ -207,30 +212,31 @@ erDiagram
         uuid id PK "活動ID"
         uuid customer_id FK "顧客ID"
         uuid activity_kind_id FK "活動種別ID"
-        uuid recorded_by FK "記録担当者ID"
-        uuid project_id FK "関連案件ID"
-        uuid deal_id FK "関連商談ID"
-        uuid contract_id FK "関連契約ID"
+        uuid recorded_by FK "営業ID"
+        uuid project_id FK "関連契約ID"
         string title "タイトル"
         datetime occurred_at "活動日時"
-        text body "内容"
+        text body "内容（Markdown）"
         datetime deleted_at "論理削除日時"
+    }
+    ACTIVITY_RELATION {
+        uuid activity_id PK,FK "活動ID"
+        uuid related_activity_id PK,FK "関連活動ID"
     }
     ACTIVITY_CONTACT {
         uuid activity_id PK,FK "活動ID"
-        uuid contact_id PK,FK "参加した顧客側担当者ID"
+        uuid contact_id PK,FK "参加した担当者ID"
     }
     ACTIVITY_ENGINEER {
         uuid activity_id PK,FK "活動ID"
-        uuid engineer_id PK,FK "参加したエンジニアID"
+        uuid engineer_id PK,FK "関連エンジニアID"
     }
     TASK {
         uuid id PK "タスクID"
         uuid customer_id FK "顧客ID"
         uuid assignee_user_id FK "担当利用者ID"
-        uuid project_id FK "関連案件ID"
+        uuid project_id FK "関連契約ID"
         uuid deal_id FK "関連商談ID"
-        uuid contract_id FK "関連契約ID"
         uuid contract_period_id FK "関連契約期間ID"
         uuid activity_id FK "関連活動ID"
         string title "タスク名"
@@ -254,13 +260,15 @@ erDiagram
     }
 ```
 
-活動・タスクの関連先は種類ごとに0〜1件、活動の参加者は中間テーブルで複数件を扱う。顧客側担当者と各関連先は、活動・タスクの顧客と一致させる。契約と契約期間などを同時指定した場合は、相互の対応も検証する。中間テーブルは2列の組み合わせを主キーにして参加者の重複を防ぐ。
+活動間の関連は`ACTIVITY_RELATION`で0件以上を選択でき、自己参照・重複・別顧客への関連付けは不可とする。選択した活動から関連先を参照し、逆方向の関連は自動追加しない。活動一覧は「関連活動」「関連契約」を別列で表示する。活動の内容はMarkdown文字列として保存し、商談・面談・その他のテンプレートを選択して入力できる。内容セルからダイアログを開いて編集・プレビューする。契約・商談などの関連先は種類ごとに0〜1件、活動の参加者は中間テーブルで複数件を扱う。担当者と各関連先は、活動・タスクの顧客と一致させる。契約と契約期間などを同時指定した場合は、相互の対応も検証する。中間テーブルは2列の組み合わせを主キーにして参加者の重複を防ぐ。
 
-エンジニアの画面では参加活動や、そのエンジニアの参画関係に属する契約に関連した活動・タスクを取得する。複数の経路で見つかる活動はIDでまとめる。顧客に紐づかない社内活動などは本図の対象外とする。
+活動とエンジニアは`ACTIVITY_ENGINEER`を介した多対多の関係とする。1件の活動に0件以上のエンジニアを紐づけ、同じエンジニアを複数の活動から参照できる。紐づけの追加・解除は活動本体と同時に保存し、変更履歴にも残す。保管済みエンジニアの既存の紐づけは表示・維持できるが、新たな紐づけの候補には含めない。
 
-電話・訪問・面談・フィードバックは`ACTIVITY_KIND`の標準データとして提供する。種別を利用者が自由に定義する設定機能は設けない。
+エンジニアに関連する活動は活動エンジニア、契約に関連する活動・タスクは契約IDから取得する。複数の経路で見つかる活動はIDでまとめる。顧客に紐づかない社内活動などは本図の対象外とする。
 
-通知元は`task_id`と`contract_period_id`のいずれか1つだけを設定する。タスク通知は`TASK.due_at`・`status`・`assignee_user_id`、契約更新処理は`CONTRACT_PERIOD.ends_on`・`renewal_status`と契約の営業担当を直接参照する。通知に必要な値が未入力なら対象外として理由を表示する。
+商談・面談・その他の3つを`ACTIVITY_KIND`の標準データとして提供する。契約は管理対象であり、活動カテゴリには含めない。種別を利用者が自由に定義する設定機能は設けない。
+
+通知元は`task_id`と`contract_period_id`のいずれか1つだけを設定する。タスク通知は`TASK.due_at`・`status`・`assignee_user_id`、契約更新処理は`CONTRACT_PERIOD.ends_on`・`renewal_status`と契約の営業を直接参照する。通知に必要な値が未入力なら対象外として理由を表示する。
 
 契約更新タスクの`automation_key`は契約期間とルールから決め、再実行時は同じタスクを更新する。通知は通知機会ごとの`idempotency_key`で重複を防ぐ。期限・状態・担当変更時は未配信通知を見直し、配信直前にも最新状態を確認する。配信済み・既読履歴は残す。
 
@@ -268,60 +276,48 @@ erDiagram
 
 IDはUUIDを読みやすい略称で表す。省略した任意列は`null`とする。状態コードや金額・日付は説明用の例。
 
-### 顧客登録から契約まで
+### 同じ内容の契約をエンジニアごとに登録する
 
-| テーブル         | 保存する値（主要列）                                                                                                                 |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| APP_USER         | `id: u-sato, display_name: 佐藤花子`                                                                                                 |
-| CUSTOMER         | `id: c-aozora, name: 青空システム, address: 東京都千代田区, trade_status: active, sales_user_id: u-sato`                             |
-| ENGINEER         | `id: e-yamada, name: 山田太郎`                                                                                                       |
-| CUSTOMER_CONTACT | `id: contact-suzuki, customer_id: c-aozora, name: 鈴木一郎, department: 情報システム部, is_primary: true`                            |
-| PROJECT          | `id: project-1, customer_id: c-aozora, name: 基幹システム刷新, required_skills: Java, headcount: 1, budget: 800000`                  |
-| DEAL             | `id: deal-1, customer_id: c-aozora, project_id: project-1, title: 基幹システム刷新への提案, stage: proposing, sales_user_id: u-sato` |
+| テーブル          | 保存する値（主要列）                                                                                                                               |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CONTRACT          | `id: project-1, customer_id: c-aozora, name: 基幹システム刷新, sales_user_id: u-sato`                                                              |
+| CONTRACT          | `id: project-2, customer_id: c-aozora, name: 基幹システム刷新（高橋）, sales_user_id: u-sato`                                                      |
+| ENGINEER          | `id: e-yamada, name: 山田太郎`                                                                                                                     |
+| ENGINEER          | `id: e-takahashi, name: 高橋美咲`                                                                                                                  |
+| CONTRACT_ENGINEER | `id: pe-1, project_id: project-1, engineer_id: e-yamada`                                                                                           |
+| CONTRACT_ENGINEER | `id: pe-2, project_id: project-2, engineer_id: e-takahashi`                                                                                        |
+| CONTRACT_PERIOD   | `id: period-1, project_engineer_id: pe-1, starts_on: 2026-10-01, ends_on: 2026-12-31, billing_rate: 800000, cost: 600000, renewal_status: pending` |
+| CONTRACT_PERIOD   | `id: period-2, project_engineer_id: pe-2, starts_on: 2026-10-01, ends_on: 2026-12-31, billing_rate: 900000, cost: 650000, renewal_status: pending` |
 
-ここまでで候補未定の商談を登録できる。山田さんを提案する段階で、`CUSTOMER_ENGINEER_RELATION`に`id: rel-1, customer_id: c-aozora, engineer_id: e-yamada`を作り、商談の`relation_id`に`rel-1`を設定する。
+2人はそれぞれの契約に属し、期間と金額を個別に保持する。更新時は同じ`pe-1`や`pe-2`に次の期間を追加する。
 
-受注時は商談を`stage: won, probability: 100`へ更新し、次の行を作る。
+### 活動と更新確認
 
-| テーブル        | 保存する値（主要列）                                                                                                                             |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| CONTRACT        | `id: contract-1, relation_id: rel-1, project_id: project-1, deal_id: deal-1, sales_user_id: u-sato, name: 山田さん 基幹システム刷新契約`         |
-| CONTRACT_PERIOD | `id: period-1, contract_id: contract-1, starts_on: 2026-10-01, ends_on: 2026-12-31, billing_rate: 800000, cost: 600000, renewal_status: pending` |
+| テーブル          | 保存する値（主要列）                                                                                                                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ACTIVITY          | `id: activity-1, customer_id: c-aozora, project_id: project-1, activity_kind_id: kind-interview, recorded_by: u-sato, title: 開発体制の確認, occurred_at: 2026-10-19T14:00:00+09:00`                   |
+| ACTIVITY_ENGINEER | `activity_id: activity-1, engineer_id: e-yamada`                                                                                                                                                       |
+| ACTIVITY_ENGINEER | `activity_id: activity-1, engineer_id: e-takahashi`                                                                                                                                                    |
+| TASK              | `id: task-1, customer_id: c-aozora, project_id: project-1, contract_period_id: period-1, assignee_user_id: u-sato, title: 基幹システム刷新の更新確認, due_at: 2026-12-31T17:00:00+09:00, status: open` |
 
-「山田さんの請求単価」は`CONTRACT_PERIOD.billing_rate`、「契約の営業担当」は`CONTRACT.sales_user_id`から読める。
-
-### 面談と更新確認
-
-| テーブル          | 保存する値（主要列）                                                                                                                                                                                                  |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ACTIVITY_KIND     | `id: kind-interview, name: 面談`                                                                                                                                                                                      |
-| ACTIVITY          | `id: activity-1, customer_id: c-aozora, activity_kind_id: kind-interview, recorded_by: u-sato, deal_id: deal-1, title: 山田さんと鈴木さんの面談, occurred_at: 2026-09-15T14:00:00+09:00, body: 参画条件を確認した`    |
-| ACTIVITY_CONTACT  | `activity_id: activity-1, contact_id: contact-suzuki`                                                                                                                                                                 |
-| ACTIVITY_ENGINEER | `activity_id: activity-1, engineer_id: e-yamada`                                                                                                                                                                      |
-| TASK              | `id: task-1, customer_id: c-aozora, contract_period_id: period-1, assignee_user_id: u-sato, title: 山田さんの契約更新を確認, due_at: 2026-11-30T17:00:00+09:00, status: open`                                         |
-| NOTIFICATION      | `id: notification-1, task_id: task-1, contract_period_id: null, recipient_user_id: u-sato, rule_key: task_due, scheduled_at: 2026-11-30T17:00:00+09:00, status: pending, idempotency_key: task-1-due-20261130-u-sato` |
-
-通知キーの文字列は例示であり、実装時には通知機会を一意に表せる形式にする。自動作成タスクにも契約期間とルールから決まる`automation_key`を設定する。
-
-契約更新が決まったら、同じ`contract-1`に次の期間を追加する。
-
-| id               | contract_id | starts_on  | ends_on    | billing_rate | cost   |
-| ---------------- | ----------- | ---------- | ---------- | ------------ | ------ |
-| period-1（既存） | contract-1  | 2026-10-01 | 2026-12-31 | 800000       | 600000 |
-| period-2（追加） | contract-1  | 2027-01-01 | 2027-03-31 | 820000       | 610000 |
-
-契約と参画関係は同じままで、以前の条件と更新後の条件を比較できる。
+活動のエンジニアは契約への紐づけとは独立して指定できる。更新通知は参画エンジニアの契約期間ごとに生成し、契約の営業へ通知する。
 
 ## 履歴・削除・整合性
 
-顧客・エンジニア・顧客側担当者・参画関係は保管でき、過去の関連情報を維持する。案件・商談・契約・契約期間・活動・タスクは論理削除と復元を基本とする。削除した対象も参照先としての存在は残し、通常一覧や通知から除外する。参照先を削除しただけで、関連データを連鎖削除しない。
+顧客・エンジニア・担当者・参画関係は保管でき、過去の関連情報を維持する。契約・商談・参画エンジニア・契約期間・活動・タスクは論理削除と復元を基本とする。削除した対象も参照先としての存在は残し、通常一覧や通知から除外する。参照先を削除しただけで、関連データを連鎖削除しない。
 
 保存時は版番号によって同時編集を検出し、変更履歴も同じトランザクションで残す。各業務テーブルに対応する履歴テーブルを設け、対象への外部キー、版番号、操作、変更者、変更日時、変更時点の内容を保持する。履歴は対象IDと版番号を一意にし、追記のみとする。図では履歴テーブルを省略している。
 
 契約更新で新しい期間を作ることと、既存期間の入力ミスを訂正して履歴を残すことは区別する。履歴には業務データの列・関連先IDと当時の表示名を含め、後の表示名変更でも意味を確認できるようにする。
+
+活動テンプレートは`activity_templates`に保存し、右上の歯車アイコンから設定メニューの「活動テンプレート」を選び、追加・編集・論理削除・復元する。商談・面談・その他を初期データとして提供する。活動への挿入はMarkdown本文のコピーとし、テンプレートへの外部キーは持たない。テンプレートの変更や削除で入力済みの活動本文は変わらない。テンプレートの変更も版番号と専用の`activity_templates_revisions`で履歴を保持する。
 
 活動種別の利用停止は新規入力を止め、既存の活動と履歴は残す。
 
 外部キー、所有顧客の一致、期間の重複防止、同時更新はDBで保証する。複数行を扱う更新は同じトランザクションで行う。参画関係の顧客・エンジニアなど、参照先の付け替えで既存の整合性を壊す変更も防ぐ。
 
 認証方式・組織境界・詳細な権限・通知チャネル・物理索引の変更は本図では扱わない。1件の活動に複数契約を結ぶ機能は現在の範囲に含めない。
+
+物理テーブル名は、契約が `projects`、参画エンジニアが `project_engineers` のままとする。図の `CONTRACT`・`CONTRACT_ENGINEER` は画面上の名称に合わせた論理名で、`project_id`・`project_engineer_id` はそれぞれへの外部キーである。
+
+活動種別の「面談」は、エンジニアが参画するために顧客と行う面談を指します。顧客との相談・提案・条件調整は「商談」、参画後のフォローやフィードバックなどは「その他」として記録します。

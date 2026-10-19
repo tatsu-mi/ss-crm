@@ -4,7 +4,6 @@ import {
   Building2,
   Users,
   BriefcaseBusiness,
-  Handshake,
   ContactRound,
   Activity,
   Folder,
@@ -13,9 +12,7 @@ import {
   Search,
   Bell,
   Plus,
-  MoreHorizontal,
   PencilLine,
-  ExternalLink,
   X,
   MapPin,
   Link,
@@ -43,17 +40,18 @@ import { newRow, forms } from "@/lib/forms";
 import { SaveCell, standardColumn } from "@/lib/sheet-columns";
 import { Spreadsheet, SheetColumn } from "./spreadsheet";
 import { Login } from "./login";
+import { SettingsMenu } from "./settings-menu";
+import { TemplateSettings } from "./template-settings";
 import { EntityEditor } from "./entity-editor";
 import { BusinessTable } from "./business-table";
 import { CustomerProfile } from "./customer-profile";
-import { ContractEngineers } from "./contract-engineers";
-import { ContractCreate } from "./contract-create";
+import { ProjectEngineers } from "./project-engineers";
 export function Crm() {
   const data = useWorkspace();
   if (data.loading)
     return (
       <main className="loading">
-        <h1>NEXUS</h1>
+        <h1>Tatsumi SS CRM</h1>
         <p>ワークスペースを準備しています…</p>
       </main>
     );
@@ -74,12 +72,11 @@ type Axis =
   | "customer_contacts"
   | "projects"
   | "deals"
-  | "contract_engineers"
   | "activities"
   | "tasks"
   | "notifications";
 type Tab =
-  "profile" | "contacts" | "projects" | "contracts" | "activities" | "tasks";
+  "profile" | "contacts" | "projects" | "members" | "activities" | "tasks";
 function WorkspaceView({
   w,
   userId,
@@ -93,6 +90,7 @@ function WorkspaceView({
   reload: () => void;
   loadError: string;
 }) {
+  const [settings, setSettings] = useState(false);
   const [axis, setAxis] = useState<Axis>("customers"),
     [selected, setSelected] = useState(
       w.customers.find((c) => !c.archived_at)?.id || "",
@@ -104,12 +102,17 @@ function WorkspaceView({
     [showDeleted, setShowDeleted] = useState(false),
     [tab, setTab] = useState<Tab>("profile"),
     [kind, setKind] = useState(""),
-    [edit, setEdit] = useState<{ table: Table; row: Base } | null>(null),
-    [createContract, setCreateContract] = useState(false),
+    [edit, setEdit] = useState<{
+      table: Table;
+      row: Base;
+      duplicateOf?: string;
+    } | null>(null),
     [related, setRelated] = useState<{ table: Table; id: string } | null>(null),
     [error, setError] = useState(""),
-    [ratio, setRatio] = useState(49);
+    [ratio, setRatio] = useState(49),
+    [detailRatio, setDetailRatio] = useState(50);
   const workspace = useRef<HTMLDivElement>(null);
+  const detailWorkspace = useRef<HTMLDivElement>(null);
   const customer =
     axis === "customers"
       ? w.customers.find((c) => c.id === selected)
@@ -154,7 +157,6 @@ function WorkspaceView({
         {
           projects: "project_id",
           deals: "deal_id",
-          contracts: "contract_id",
           activities: "activity_id",
         } as Partial<Record<Table, string>>
       )[related.table];
@@ -171,7 +173,7 @@ function WorkspaceView({
     setEdit({
       table: "contract_periods",
       row: newRow("contract_periods", {
-        contract_id: p.contract_id,
+        project_engineer_id: p.project_engineer_id,
         starts_on: start,
         ends_on: end.toISOString().slice(0, 10),
         billing_rate: p.billing_rate,
@@ -186,11 +188,14 @@ function WorkspaceView({
   }
   function matchesRelated(row: Base) {
     if (!related) return true;
+    if (related.table === "activities" && "activity_kind_id" in row)
+      return w.activity_relations.some(
+        (x) => x.activity_id === row.id && x.related_activity_id === related.id,
+      );
     const key = (
       {
         projects: "project_id",
         deals: "deal_id",
-        contracts: "contract_id",
         activities: "activity_id",
       } as Partial<Record<Table, string>>
     )[related.table];
@@ -222,20 +227,6 @@ function WorkspaceView({
       ),
     },
     {
-      key: "open",
-      label: "",
-      width: 32,
-      render: (r) => (
-        <button
-          className="cell-action"
-          aria-label={`${r.name}の詳細を表示`}
-          onClick={() => setSelected(r.id)}
-        >
-          <ExternalLink size={15} />
-        </button>
-      ),
-    },
-    {
       ...standardColumn(w, "customers", "name", saveCell, "取引先名", 190),
       render: (r) => (
         <button className="company-cell" onClick={() => setSelected(r.id)}>
@@ -256,7 +247,7 @@ function WorkspaceView({
     },
     {
       key: "engineers",
-      label: "契約エンジニア数",
+      label: "稼働エンジニア数",
       width: 125,
       value: (r) => `${activeCount(w, r.id)}名`,
     },
@@ -280,7 +271,7 @@ function WorkspaceView({
       width: 105,
       value: (r) => date(r.updated_at),
     },
-    standardColumn(w, "customers", "sales_user_id", saveCell, "担当者", 105),
+    standardColumn(w, "customers", "sales_user_id", saveCell, "営業", 105),
   ];
   const customerRows = (table: Table) =>
     w[table].filter(
@@ -288,7 +279,6 @@ function WorkspaceView({
         customerOf(w, table, row) === customer?.id &&
         (showDeleted || !inactive(row)),
     );
-  const kindLabel = (name: string) => (name === "フィードバック" ? "FB" : name);
   const activities = (all = false) =>
     w.activities
       .filter(
@@ -296,28 +286,24 @@ function WorkspaceView({
           (all || a.customer_id === customer?.id) &&
           (showDeleted || !inactive(a)) &&
           (!kind ||
-            kindLabel(
-              w.activity_kinds.find((k) => k.id === a.activity_kind_id)?.name ||
-                "",
-            ) === kind) &&
+            w.activity_kinds.find((k) => k.id === a.activity_kind_id)?.name ===
+              kind) &&
           matchesRelated(a),
       )
       .sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
   const activityTabs = (
     <div className="mock-activity-tabs">
-      {["すべて", "商談", "提案", "契約", "面談", "FB", "その他"].map(
-        (name) => (
-          <button
-            key={name}
-            className={
-              (!kind && name === "すべて") || kind === name ? "active" : ""
-            }
-            onClick={() => setKind(name === "すべて" ? "" : name)}
-          >
-            {name}
-          </button>
-        ),
-      )}
+      {["すべて", "商談", "面談", "その他"].map((name) => (
+        <button
+          key={name}
+          className={
+            (!kind && name === "すべて") || kind === name ? "active" : ""
+          }
+          onClick={() => setKind(name === "すべて" ? "" : name)}
+        >
+          {name}
+        </button>
+      ))}
     </div>
   );
   const business = (table: Table, rows: Base[], label?: string) => (
@@ -326,35 +312,28 @@ function WorkspaceView({
       table={table}
       data={rows}
       onEdit={setEdit}
-      onRelated={
-        ["projects", "deals", "contracts"].includes(table)
-          ? linkFilter
+      onDuplicate={
+        table === "projects"
+          ? (source) =>
+              setEdit({
+                table: "projects",
+                row: newRow("projects", {
+                  ...Object.fromEntries(
+                    forms.projects.fields.map((f) => [f.key, source[f.key]]),
+                  ),
+                  name: `${source.name}（コピー）`,
+                }),
+                duplicateOf: source.id,
+              })
           : undefined
       }
+      onRelated={table === "projects" ? linkFilter : undefined}
       onRenew={renew}
       saveCell={saveCell}
       label={label}
     />
   );
   function globalContent() {
-    if (axis === "contract_engineers")
-      return (
-        <ContractEngineers
-          w={w}
-          saveCell={saveCell}
-          onEdit={(table, row) => {
-            if (table === "contracts")
-              openNew("contract_periods", { contract_id: row.id });
-            else setEdit({ table, row });
-          }}
-          onRenew={renew}
-          onRelated={(row) => {
-            navigate("customers");
-            setSelected(customerOf(w, "contracts", row) || "");
-            linkFilter({ table: "contracts", id: row.id });
-          }}
-        />
-      );
     if (axis === "activities") return business("activities", activities(true));
     if (axis === "notifications")
       return (
@@ -401,9 +380,8 @@ function WorkspaceView({
       customers: "取引先",
       engineers: "エンジニア",
       customer_contacts: "担当者",
-      projects: "案件",
+      projects: "契約",
       deals: "商談",
-      contract_engineers: "契約エンジニア",
       activities: "活動",
       tasks: "自分のタスク",
       notifications: "通知",
@@ -413,24 +391,14 @@ function WorkspaceView({
     <main className="app-shell mock-workspace">
       <header className="topbar">
         <a href="/" className="brand">
-          NEXUS <span>CRM</span>
+          Tatsumi SS <span>CRM</span>
         </a>
         <nav aria-label="メインメニュー">
           {(
             [
               { axis: "customers", label: "取引先", icon: Building2 },
-              {
-                axis: "customer_contacts",
-                label: "担当者",
-                icon: ContactRound,
-              },
-              { axis: "projects", label: "案件", icon: BriefcaseBusiness },
-              { axis: "deals", label: "商談", icon: Handshake },
-              {
-                axis: "contract_engineers",
-                label: "契約エンジニア",
-                icon: Users,
-              },
+              { axis: "projects", label: "契約", icon: BriefcaseBusiness },
+              { axis: "engineers", label: "エンジニア", icon: Users },
               { axis: "activities", label: "活動", icon: Activity },
             ] as const
           ).map((item) => (
@@ -457,6 +425,11 @@ function WorkspaceView({
           </button>
         </nav>
         <div className="topbar-right">
+          <SettingsMenu
+            items={[
+              { label: "活動テンプレート", onSelect: () => setSettings(true) },
+            ]}
+          />
           <button
             className="top-icon"
             aria-label="自分のタスク"
@@ -547,34 +520,15 @@ function WorkspaceView({
               詳細絞り込み
             </button>
             <div className="spacer" />
-            {axis === "contract_engineers" && (
-              <button
-                className="button secondary"
-                onClick={() => navigate("engineers")}
-              >
-                エンジニア一覧
-              </button>
-            )}
             {axis !== "notifications" && (
               <button
                 className="button primary"
-                onClick={() =>
-                  axis === "contract_engineers"
-                    ? setCreateContract(true)
-                    : openNew(axis as Table)
-                }
+                onClick={() => openNew(axis as Table)}
               >
                 <Plus size={15} />
                 新規登録
               </button>
             )}
-            <button
-              className="icon-button"
-              aria-label="一覧のメニュー"
-              onClick={() => setFilters(!filters)}
-            >
-              <MoreHorizontal size={20} />
-            </button>
           </div>
           {filters && (
             <div className="filters">
@@ -598,9 +552,9 @@ function WorkspaceView({
                     </select>
                   </label>
                   <label>
-                    担当者
+                    営業
                     <select
-                      aria-label="営業担当で絞り込み"
+                      aria-label="営業で絞り込み"
                       value={sales}
                       onChange={(e) => setSales(e.target.value)}
                     >
@@ -636,18 +590,6 @@ function WorkspaceView({
                   setRelated(null);
                 }}
                 selectedId={selected}
-                actions={(row) => (
-                  <button
-                    className="cell-action"
-                    aria-label={`${row.name}の詳細・履歴`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEdit({ table: "customers", row });
-                    }}
-                  >
-                    <MoreHorizontal size={15} />
-                  </button>
-                )}
               />
             </div>
           ) : (
@@ -704,7 +646,13 @@ function WorkspaceView({
                 e.currentTarget.releasePointerCapture(e.pointerId)
               }
             />
-            <div className="detail-workspace">
+            <div
+              className="detail-workspace"
+              ref={detailWorkspace}
+              style={{
+                gridTemplateColumns: `minmax(0, ${detailRatio}fr) 7px minmax(0, ${100 - detailRatio}fr)`,
+              }}
+            >
               <section className="panel customer-detail">
                 <header className="customer-heading">
                   <ChevronDown size={16} />
@@ -720,32 +668,36 @@ function WorkspaceView({
                       rel="noreferrer"
                     >
                       <Link size={15} />
-                      {customer.website}
+                      <span>{customer.website}</span>
                     </a>
                   )}
                   {customer.address && (
-                    <span className="customer-location">
+                    <span
+                      className="customer-location"
+                      title={String(customer.address)}
+                    >
                       <MapPin size={15} />
-                      {customer.address}
+                      <span>{customer.address}</span>
                     </span>
                   )}
-                  <div className="spacer" />
-                  <button
-                    className="icon-button"
-                    aria-label="取引先の詳細・履歴"
-                    onClick={() =>
-                      setEdit({ table: "customers", row: customer })
-                    }
-                  >
-                    <MoreHorizontal size={18} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label="詳細を閉じる"
-                    onClick={() => setSelected("")}
-                  >
-                    <X size={16} />
-                  </button>
+                  <div className="customer-heading-actions">
+                    <button
+                      className="icon-button"
+                      aria-label="取引先を編集"
+                      onClick={() =>
+                        setEdit({ table: "customers", row: customer })
+                      }
+                    >
+                      <PencilLine size={18} />
+                    </button>
+                    <button
+                      className="icon-button"
+                      aria-label="詳細を閉じる"
+                      onClick={() => setSelected("")}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
                 </header>
                 <div className="detail-tabs">
                   {(
@@ -754,12 +706,9 @@ function WorkspaceView({
                       { id: "contacts", label: "担当者" },
                       {
                         id: "projects",
-                        label: `案件（${customerRows("projects").length}）`,
+                        label: `契約（${customerRows("projects").length}）`,
                       },
-                      {
-                        id: "contracts",
-                        label: `契約エンジニア（${activeCount(w, customer.id)}）`,
-                      },
+                      { id: "members", label: "参画エンジニア" },
                       { id: "activities", label: "活動履歴" },
                       { id: "tasks", label: "タスク" },
                     ] as const
@@ -799,65 +748,47 @@ function WorkspaceView({
                       w={w}
                       customer={customer}
                       save={saveCell}
-                      onEdit={setEdit}
-                      onAddContact={() => openNew("customer_contacts")}
                     />
-                  ) : tab === "contracts" ? (
-                    <>
-                      <div className="mock-section-heading">
-                        <FileText size={16} />
-                        <h3>契約エンジニア</h3>
-                        <button
-                          className="button primary"
-                          onClick={() => setCreateContract(true)}
-                        >
-                          <Plus size={14} />
-                          契約エンジニアを追加
-                        </button>
-                      </div>
-                      <ContractEngineers
-                        w={w}
-                        customerId={customer.id}
-                        saveCell={saveCell}
-                        onEdit={(table, row) =>
-                          table === "contracts"
-                            ? openNew("contract_periods", {
-                                contract_id: row.id,
-                              })
-                            : setEdit({ table, row })
-                        }
-                        onRenew={renew}
-                        onRelated={(row) =>
-                          linkFilter({ table: "contracts", id: row.id })
-                        }
-                      />
-                    </>
                   ) : (
                     <>
                       {tab === "projects" ? (
                         <>
                           <div className="mock-section-heading">
                             <FileText size={16} />
-                            <h3>案件</h3>
+                            <h3>契約</h3>
                             <button
                               className="button primary"
                               onClick={() => openNew("projects")}
                             >
-                              案件を追加
+                              契約を追加
                             </button>
                           </div>
                           {business("projects", customerRows("projects"))}
+                        </>
+                      ) : tab === "members" ? (
+                        <>
                           <div className="mock-section-heading">
-                            <FileText size={16} />
-                            <h3>商談</h3>
-                            <button
-                              className="button primary"
-                              onClick={() => openNew("deals")}
-                            >
-                              商談を追加
-                            </button>
+                            <h3>参画エンジニア・契約期間</h3>
                           </div>
-                          {business("deals", customerRows("deals"))}
+                          <ProjectEngineers
+                            w={w}
+                            customerId={customer.id}
+                            saveCell={saveCell}
+                            onContract={(row) =>
+                              setEdit({ table: "projects", row })
+                            }
+                            onEdit={(table, row) =>
+                              table === "project_engineers"
+                                ? openNew("contract_periods", {
+                                    project_engineer_id: row.id,
+                                  })
+                                : setEdit({ table, row })
+                            }
+                            onRenew={renew}
+                            onRelated={(row) =>
+                              linkFilter({ table: "projects", id: row.id })
+                            }
+                          />
                         </>
                       ) : (
                         <>
@@ -905,6 +836,62 @@ function WorkspaceView({
                   )}
                 </div>
               </section>
+              <div
+                className="detail-splitter"
+                role="separator"
+                aria-label="取引先詳細と活動の幅"
+                aria-orientation="vertical"
+                aria-valuemin={25}
+                aria-valuemax={75}
+                aria-valuenow={detailRatio}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (
+                    ["Home", "End", "ArrowLeft", "ArrowRight"].includes(e.key)
+                  ) {
+                    e.preventDefault();
+                    setDetailRatio((r) =>
+                      e.key === "Home"
+                        ? 25
+                        : e.key === "End"
+                          ? 75
+                          : Math.max(
+                              25,
+                              Math.min(
+                                75,
+                                r + (e.key === "ArrowRight" ? 5 : -5),
+                              ),
+                            ),
+                    );
+                  }
+                }}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                }}
+                onPointerMove={(e) => {
+                  if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                    const box =
+                      detailWorkspace.current!.getBoundingClientRect();
+                    const available = box.width - 7;
+                    if (available <= 0) return;
+                    setDetailRatio(
+                      Math.max(
+                        25,
+                        Math.min(
+                          75,
+                          Math.round(
+                            ((e.clientX - box.left - 3.5) / available) * 100,
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                }}
+                onPointerUp={(e) =>
+                  e.currentTarget.releasePointerCapture(e.pointerId)
+                }
+              />
               <section className="panel activity-panel">
                 <div className="activity-head">
                   <h2>
@@ -918,13 +905,6 @@ function WorkspaceView({
                   >
                     <Plus size={14} />
                     活動を追加
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label="活動のメニュー"
-                    onClick={() => setShowDeleted(!showDeleted)}
-                  >
-                    <MoreHorizontal size={18} />
                   </button>
                 </div>
                 {related && (
@@ -943,12 +923,20 @@ function WorkspaceView({
           </>
         )}
       </div>
+      {settings && (
+        <TemplateSettings
+          w={w}
+          save={save}
+          onClose={() => setSettings(false)}
+        />
+      )}
       {edit && (
         <EntityEditor
           key={`${edit.table}:${edit.row.id}`}
           w={w}
           table={edit.table}
           initial={edit.row}
+          duplicateOf={edit.duplicateOf}
           customerId={customer?.id || ""}
           userId={userId}
           onClose={() => setEdit(null)}
@@ -960,15 +948,6 @@ function WorkspaceView({
             }
             setEdit(null);
           }}
-        />
-      )}
-      {createContract && (
-        <ContractCreate
-          w={w}
-          customerId={customer?.id || ""}
-          userId={userId}
-          save={save}
-          onClose={() => setCreateContract(false)}
         />
       )}
     </main>

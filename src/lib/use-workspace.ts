@@ -4,7 +4,7 @@ import { browserClient, configured, invalidConfiguration } from "./supabase";
 import { demoWorkspace } from "./demo";
 import { applyCommand, runReminders } from "./domain";
 import type { Workspace, Command } from "./model";
-const STORAGE = "nexus-crm-demo-v2";
+const STORAGE = "nexus-crm-demo-v6";
 export function useWorkspace() {
   const [w, setW] = useState<Workspace | null>(null),
     [userId, setUserId] = useState(""),

@@ -48,16 +48,23 @@ const date = (key: string, label: string, required = false): Input => ({
   required,
 });
 const customer = () => ref("customer_id", "顧客", "customers", true);
-const sales = () => ref("sales_user_id", "自社営業担当", "users");
+const sales = () => ref("sales_user_id", "営業", "users");
 const links = (): Input[] => [
-  ref("project_id", "関連案件", "projects"),
+  ref("project_id", "関連契約", "projects"),
   ref("deal_id", "関連商談", "deals"),
-  ref("contract_id", "関連契約", "contracts"),
 ];
 export const forms: Record<
   Table,
   { label: string; lifecycle: "archived_at" | "deleted_at"; fields: Input[] }
 > = {
+  activity_templates: {
+    label: "活動テンプレート",
+    lifecycle: "deleted_at",
+    fields: [
+      text("name", "テンプレート名", true),
+      { key: "body", label: "内容", type: "textarea", required: true },
+    ],
+  },
   customers: {
     label: "顧客",
     lifecycle: "archived_at",
@@ -90,7 +97,7 @@ export const forms: Record<
     ],
   },
   customer_contacts: {
-    label: "顧客側担当者",
+    label: "担当者",
     lifecycle: "archived_at",
     fields: [
       customer(),
@@ -112,20 +119,16 @@ export const forms: Record<
     ],
   },
   projects: {
-    label: "案件",
+    label: "契約",
     lifecycle: "deleted_at",
     fields: [
       customer(),
-      text("name", "案件名", true),
+      text("name", "契約名", true),
       { key: "description", label: "概要", type: "textarea" },
       text("required_skills", "必要スキル"),
-      { key: "headcount", label: "募集人数", type: "number", min: 1 },
       money("budget", "希望単価"),
       date("planned_start_on", "参画予定日"),
-      select("recruitment_status", "募集状態", [
-        ["open", "募集中"],
-        ["closed", "募集終了"],
-      ]),
+      sales(),
     ],
   },
   deals: {
@@ -134,7 +137,7 @@ export const forms: Record<
     fields: [
       customer(),
       text("title", "商談名", true),
-      ref("project_id", "案件", "projects"),
+      ref("project_id", "契約", "projects"),
       ref("relation_id", "候補の参画関係", "customer_engineer_relations"),
       sales(),
       select("stage", "進捗段階", [
@@ -157,22 +160,19 @@ export const forms: Record<
       date("planned_end_on", "参画予定終了日"),
     ],
   },
-  contracts: {
-    label: "契約",
+  project_engineers: {
+    label: "参画エンジニア",
     lifecycle: "deleted_at",
     fields: [
-      text("name", "契約名", true),
-      ref("relation_id", "参画関係", "customer_engineer_relations", true),
-      ref("project_id", "案件", "projects"),
-      ref("deal_id", "受注商談", "deals"),
-      sales(),
+      ref("project_id", "契約", "projects", true),
+      ref("engineer_id", "エンジニア", "engineers", true),
     ],
   },
   contract_periods: {
     label: "契約期間",
     lifecycle: "deleted_at",
     fields: [
-      ref("contract_id", "契約", "contracts", true),
+      ref("project_engineer_id", "参画エンジニア", "project_engineers", true),
       date("starts_on", "開始日", true),
       date("ends_on", "終了日", true),
       money("billing_rate", "請求単価", true),
@@ -192,7 +192,7 @@ export const forms: Record<
       customer(),
       text("title", "タイトル", true),
       ref("activity_kind_id", "活動種別", "activity_kinds", true),
-      ref("recorded_by", "記録担当者", "users", true),
+      ref("recorded_by", "営業", "users", true),
       {
         key: "occurred_at",
         label: "活動日時",
@@ -200,7 +200,7 @@ export const forms: Record<
         required: true,
       },
       { key: "body", label: "内容", type: "textarea" },
-      ...links(),
+      ref("project_id", "関連契約", "projects"),
     ],
   },
   tasks: {
@@ -210,7 +210,7 @@ export const forms: Record<
       customer(),
       text("title", "タイトル", true),
       { key: "body", label: "内容", type: "textarea" },
-      ref("assignee_user_id", "担当者", "users"),
+      ref("assignee_user_id", "営業", "users"),
       { key: "due_at", label: "期限", type: "datetime-local" },
       select("status", "状態", [
         ["open", "未着手"],
@@ -257,6 +257,10 @@ export function display(
           ? w.activity_kinds
           : w[field.ref];
     const target = list.find((x) => x.id === value);
+    if (field.ref === "project_engineers" && target) {
+      const assignment = w.project_engineers.find((x) => x.id === value)!;
+      return `${w.projects.find((p) => p.id === assignment.project_id)?.name || "契約"} / ${w.engineers.find((e) => e.id === assignment.engineer_id)?.name || "エンジニア"}`;
+    }
     return target
       ? String(
           "display_name" in target

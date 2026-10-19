@@ -47,10 +47,9 @@ export interface Project extends Base {
   name: string;
   description: string | null;
   required_skills: string | null;
-  headcount: number | null;
   budget: string | null;
   planned_start_on: string | null;
-  recruitment_status: string;
+  sales_user_id: string | null;
   deleted_at: string | null;
 }
 export interface Deal extends Base {
@@ -67,16 +66,13 @@ export interface Deal extends Base {
   planned_end_on: string | null;
   deleted_at: string | null;
 }
-export interface Contract extends Base {
-  relation_id: string;
-  project_id: string | null;
-  deal_id: string | null;
-  sales_user_id: string | null;
-  name: string;
+export interface ProjectEngineer extends Base {
+  project_id: string;
+  engineer_id: string;
   deleted_at: string | null;
 }
 export interface ContractPeriod extends Base {
-  contract_id: string;
+  project_engineer_id: string;
   starts_on: string;
   ends_on: string;
   billing_rate: string;
@@ -90,8 +86,6 @@ export interface Activity extends Base {
   activity_kind_id: string;
   recorded_by: string;
   project_id: string | null;
-  deal_id: string | null;
-  contract_id: string | null;
   title: string;
   occurred_at: string;
   body: string | null;
@@ -102,7 +96,6 @@ export interface Task extends Base {
   assignee_user_id: string | null;
   project_id: string | null;
   deal_id: string | null;
-  contract_id: string | null;
   contract_period_id: string | null;
   activity_id: string | null;
   title: string;
@@ -112,14 +105,20 @@ export interface Task extends Base {
   automation_key: string | null;
   deleted_at: string | null;
 }
+export interface ActivityTemplate extends Base {
+  name: string;
+  body: string;
+  deleted_at: string | null;
+}
 export interface Tables {
+  activity_templates: ActivityTemplate;
   customers: Customer;
   engineers: Engineer;
   customer_contacts: Contact;
   customer_engineer_relations: Relation;
   projects: Project;
   deals: Deal;
-  contracts: Contract;
+  project_engineers: ProjectEngineer;
   contract_periods: ContractPeriod;
   activities: Activity;
   tasks: Task;
@@ -159,6 +158,8 @@ export interface Revision {
     row: Base;
     reference_labels?: Record<string, string>;
     participant_labels?: Record<string, string>;
+    related_activity_ids?: string[];
+    related_activity_labels?: Record<string, string>;
     contact_ids?: string[];
     engineer_ids?: string[];
   };
@@ -168,6 +169,7 @@ export interface Revision {
 export type Workspace = { [K in Table]: Tables[K][] } & {
   users: AppUser[];
   activity_kinds: ActivityKind[];
+  activity_relations: { activity_id: string; related_activity_id: string }[];
   activity_contacts: { activity_id: string; contact_id: string }[];
   activity_engineers: { activity_id: string; engineer_id: string }[];
   revisions: Revision[];
@@ -180,6 +182,7 @@ export type Command =
       table: Table;
       row: Base;
       expected_version: number;
+      related_activity_ids?: string[];
       contact_ids?: string[];
       engineer_ids?: string[];
     }
@@ -192,31 +195,34 @@ export type Command =
     }
   | { kind: "read_notification"; id: string };
 export const tableNames: Table[] = [
+  "activity_templates",
   "customers",
   "engineers",
   "customer_contacts",
   "customer_engineer_relations",
   "projects",
   "deals",
-  "contracts",
+  "project_engineers",
   "contract_periods",
   "activities",
   "tasks",
 ];
 export function emptyWorkspace(): Workspace {
   return {
+    activity_templates: [],
     customers: [],
     engineers: [],
     customer_contacts: [],
     customer_engineer_relations: [],
     projects: [],
     deals: [],
-    contracts: [],
+    project_engineers: [],
     contract_periods: [],
     activities: [],
     tasks: [],
     users: [],
     activity_kinds: [],
+    activity_relations: [],
     activity_contacts: [],
     activity_engineers: [],
     revisions: [],
@@ -247,14 +253,15 @@ export function customerOf(
 ): string | null {
   if (table === "customers") return row.id;
   if (row.customer_id) return String(row.customer_id);
-  if (table === "contracts")
-    return (
-      w.customer_engineer_relations.find((x) => x.id === row.relation_id)
-        ?.customer_id || null
-    );
+  if (table === "project_engineers") {
+    const project = w.projects.find((p) => p.id === row.project_id);
+    return project?.customer_id || null;
+  }
   if (table === "contract_periods") {
-    const c = w.contracts.find((x) => x.id === row.contract_id);
-    return c ? customerOf(w, "contracts", c) : null;
+    const assignment = w.project_engineers.find(
+      (x) => x.id === row.project_engineer_id,
+    );
+    return assignment ? customerOf(w, "project_engineers", assignment) : null;
   }
   return null;
 }
@@ -263,16 +270,18 @@ export function activeCount(w: Workspace, customer: string, day = today()) {
     w.contract_periods
       .filter((p) => !inactive(p) && p.starts_on <= day && p.ends_on >= day)
       .flatMap((p) => {
-        const c = w.contracts.find(
-          (c) => c.id === p.contract_id && !inactive(c),
+        const assignment = w.project_engineers.find(
+          (x) => x.id === p.project_engineer_id && !inactive(x),
         );
-        const r = w.customer_engineer_relations.find(
-          (r) => r.id === c?.relation_id && !inactive(r),
+        const project = w.projects.find(
+          (x) => x.id === assignment?.project_id && !inactive(x),
         );
-        return r &&
-          r.customer_id === customer &&
-          w.engineers.some((e) => e.id === r.engineer_id && !inactive(e))
-          ? [r.engineer_id]
+        return assignment &&
+          project?.customer_id === customer &&
+          w.engineers.some(
+            (e) => e.id === assignment.engineer_id && !inactive(e),
+          )
+          ? [assignment.engineer_id]
           : [];
       }),
   ).size;

@@ -7,6 +7,7 @@ import {
   today,
   Tables,
 } from "./model";
+import { initialActivityTemplates } from "./initial-activity-templates";
 import { newRow } from "./forms";
 import { applyCommand, runReminders } from "./domain";
 export const stableId = (n: number) =>
@@ -28,17 +29,12 @@ export function demoWorkspace(): Workspace {
     },
   ];
   w.activity_kinds = [
-    "電話",
-    "訪問",
-    "面談",
-    "フィードバック",
-    "商談",
-    "その他",
-    "提案",
-    "契約",
-  ].map((name, i) => ({
-    id: stableId(10 + i),
-    name,
+    [14, "商談"],
+    [12, "面談"],
+    [15, "その他"],
+  ].map(([id, name], i) => ({
+    id: stableId(Number(id)),
+    name: String(name),
     display_order: i + 1,
     archived_at: null,
   }));
@@ -112,14 +108,13 @@ export function demoWorkspace(): Workspace {
   const project = add("projects", {
     customer_id: c.id,
     name: "基幹システム刷新",
+    sales_user_id: w.users[0].id,
     description: "販売管理システムの刷新",
     required_skills: "Java、PostgreSQL",
-    headcount: 2,
     budget: "800000",
-    recruitment_status: "open",
     planned_start_on: addDays(day, -30),
   });
-  const deal = add("deals", {
+  add("deals", {
     customer_id: c.id,
     project_id: project.id,
     relation_id: relation.id,
@@ -131,15 +126,12 @@ export function demoWorkspace(): Workspace {
     planned_start_on: addDays(day, -30),
     planned_end_on: addDays(day, 20),
   });
-  const contract = add("contracts", {
-    name: "山田さん 基幹システム刷新契約",
-    relation_id: relation.id,
+  const assignment = add("project_engineers", {
     project_id: project.id,
-    deal_id: deal.id,
-    sales_user_id: w.users[0].id,
+    engineer_id: e.id,
   });
   add("contract_periods", {
-    contract_id: contract.id,
+    project_engineer_id: assignment.id,
     starts_on: addDays(day, -30),
     ends_on: addDays(day, 20),
     billing_rate: "800000",
@@ -151,14 +143,12 @@ export function demoWorkspace(): Workspace {
     "activities",
     {
       customer_id: c.id,
-      title: "次期開発体制についての面談",
-      activity_kind_id: w.activity_kinds[2].id,
+      title: "山田さんの参画面談",
+      activity_kind_id: w.activity_kinds.find((k) => k.name === "面談")!.id,
       recorded_by: w.users[0].id,
       occurred_at: `${addDays(day, -1)}T14:00:00+09:00`,
-      body: "山田さんの担当範囲と次期開発の体制を確認しました。",
+      body: "参画に向けて、顧客の担当者と山田さんのスキル・担当業務・参画条件を確認しました。",
       project_id: project.id,
-      deal_id: deal.id,
-      contract_id: contract.id,
     },
     [contact.id],
     [e.id],
@@ -207,39 +197,73 @@ export function demoWorkspace(): Workspace {
       phone: "080-1234-5678",
       is_primary: false,
     });
-  const kinds = ["商談", "提案", "面談", "フィードバック", "契約", "その他"];
-  for (let i = 0; i < 10; i++)
+  const sampleActivities: [string, string, string, string?][] = [
+    [
+      "追加要員のご相談",
+      "商談",
+      "来期に向けた追加要員について顧客と相談しました。",
+    ],
+    ["見積書の提出", "商談", "開発体制の見積書を提出しました。"],
+    [
+      "田中様との定例商談",
+      "商談",
+      "顧客の田中様と今後の開発体制について相談しました。",
+    ],
+    [
+      "山田さんの参画後フォロー",
+      "その他",
+      "参画後の業務状況を確認し、顧客からのフィードバックを共有しました。",
+    ],
+    ["契約更新", "商談", "次期契約の期間と単価を顧客と調整しました。"],
+    [
+      "新規プロジェクトの打診",
+      "商談",
+      "新規開発の予定と必要な体制を確認しました。",
+    ],
+    [
+      "人材提案（Javaエンジニア）",
+      "商談",
+      "開発体制の候補となるエンジニアを提案しました。",
+    ],
+    [
+      "高橋さんの参画面談",
+      "面談",
+      "参画候補の高橋さんと顧客の担当者が、経験・スキルと参画条件を確認しました。",
+      w.engineers[1].id,
+    ],
+    ["問い合わせ対応", "その他", "顧客からの問い合わせに回答しました。"],
+    [
+      "次年度計画について",
+      "商談",
+      "顧客と次年度の開発計画と支援体制について相談しました。",
+    ],
+  ];
+  for (const [i, [title, kind, body, engineerId]] of sampleActivities.entries())
     add(
       "activities",
       {
         customer_id: c.id,
-        title: [
-          "追加要員のご相談",
-          "見積書の提出",
-          "田中様との定例面談",
-          "山田さん 3か月FB",
-          "契約更新",
-          "新規プロジェクトの打診",
-          "人材提案（Javaエンジニア）",
-          "現場面談",
-          "問い合わせ対応",
-          "次年度計画について",
-        ][i],
-        activity_kind_id: w.activity_kinds.find(
-          (k) => k.name === kinds[i % kinds.length],
-        )!.id,
+        title,
+        activity_kind_id: w.activity_kinds.find((k) => k.name === kind)!.id,
         recorded_by: w.users[i % 2].id,
         occurred_at: `${addDays(day, -i - 2)}T14:00:00+09:00`,
-        body: [
-          "来期に向けた追加要員についてご相談。",
-          "開発体制の見積書を提出しました。",
-          "現在の状況と今後の担当範囲を確認。",
-          "技術面・勤怠ともに良好とのこと。",
-        ][i % 4],
-        project_id: project.id,
+        body,
+        project_id: kind === "面談" ? null : project.id,
       },
       [contact.id],
-      [e.id],
+      [engineerId || e.id],
     );
+  for (const template of initialActivityTemplates) {
+    w = applyCommand(
+      w,
+      {
+        kind: "save",
+        table: "activity_templates",
+        row: newRow("activity_templates", template),
+        expected_version: 0,
+      },
+      w.users[0].id,
+    );
+  }
   return runReminders(w);
 }

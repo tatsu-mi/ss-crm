@@ -89,14 +89,6 @@ export function validateWorkspace(w: Workspace) {
         row.planned_start_on > row.planned_end_on
       )
         fail("予定期間の開始日が終了日を超えています。");
-      if (table === "contracts" && row.deal_id) {
-        const d = w.deals.find((d) => d.id === row.deal_id)!;
-        if (d.stage !== "won") fail("受注商談を選択してください。");
-        if (d.relation_id && d.relation_id !== row.relation_id)
-          fail("商談と契約の参画関係が異なります。");
-        if (d.project_id && row.project_id && d.project_id !== row.project_id)
-          fail("商談と契約の案件が異なります。");
-      }
       if (table === "contract_periods") {
         if (String(row.starts_on) > String(row.ends_on))
           fail("開始日は終了日以前にしてください。");
@@ -106,55 +98,75 @@ export function validateWorkspace(w: Workspace) {
             (p) =>
               p.id !== row.id &&
               !inactive(p) &&
-              p.contract_id === row.contract_id &&
+              p.project_engineer_id === row.project_engineer_id &&
               p.starts_on <= String(row.ends_on) &&
               p.ends_on >= String(row.starts_on),
           )
         )
-          fail("同じ契約の期間が重複しています。");
+          fail("同じ参画エンジニアの期間が重複しています。");
       }
-      if (table === "activities" || table === "tasks") {
+      if (table === "tasks") {
         const deal = w.deals.find((d) => d.id === row.deal_id);
-        const period = w.contract_periods.find(
-          (p) => p.id === row.contract_period_id,
-        );
-        const contract = w.contracts.find(
-          (c) => c.id === (row.contract_id || period?.contract_id),
-        );
         if (
           deal?.project_id &&
           row.project_id &&
           deal.project_id !== row.project_id
         )
-          fail("関連案件と商談が一致しません。");
-        if (contract) {
-          if (
-            contract.project_id &&
-            row.project_id &&
-            contract.project_id !== row.project_id
-          )
-            fail("関連案件と契約が一致しません。");
-          if (
-            contract.deal_id &&
-            row.deal_id &&
-            contract.deal_id !== row.deal_id
-          )
-            fail("関連商談と契約が一致しません。");
-        }
+          fail("関連契約と商談が一致しません。");
       }
       if (table === "tasks") {
         const p = w.contract_periods.find(
           (p) => p.id === row.contract_period_id,
         );
-        if (p && row.contract_id && p.contract_id !== row.contract_id)
+        const assignment = w.project_engineers.find(
+          (x) => x.id === p?.project_engineer_id,
+        );
+        if (
+          assignment &&
+          row.project_id &&
+          assignment.project_id !== row.project_id
+        )
           fail("契約と契約期間が一致しません。");
         const a = w.activities.find((a) => a.id === row.activity_id);
-        if (a)
-          for (const k of ["project_id", "deal_id", "contract_id"])
-            if (row[k] && a[k] && row[k] !== a[k])
-              fail("タスクと関連活動の関連先が一致しません。");
+        const deal = w.deals.find((d) => d.id === row.deal_id);
+        const projectIds = [
+          row.project_id,
+          assignment?.project_id,
+          deal?.project_id,
+          a?.project_id,
+        ].filter(Boolean);
+        if (new Set(projectIds).size > 1)
+          fail("タスクの契約・商談・契約期間・活動が一致しません。");
+        if (
+          a &&
+          row.project_id &&
+          a.project_id &&
+          row.project_id !== a.project_id
+        )
+          fail("タスクと関連活動の関連先が一致しません。");
       }
     }
+  const assignments = new Set<string>();
+  for (const assignment of w.project_engineers.filter((x) => !inactive(x))) {
+    const key = assignment.project_id;
+    if (assignments.has(key)) fail("1契約に紐づけられるエンジニアは1人です。");
+    assignments.add(key);
+  }
+  const relatedPairs = new Set<string>();
+  for (const link of w.activity_relations) {
+    const source = w.activities.find((a) => a.id === link.activity_id);
+    const target = w.activities.find((a) => a.id === link.related_activity_id);
+    if (
+      !source ||
+      !target ||
+      source.id === target.id ||
+      source.customer_id !== target.customer_id
+    )
+      fail("関連活動は同じ顧客の別の活動を選択してください。");
+    const pair = `${link.activity_id}:${link.related_activity_id}`;
+    if (relatedPairs.has(pair)) fail("関連活動が重複しています。");
+    relatedPairs.add(pair);
+  }
   const seen = new Set<string>();
   for (const link of w.activity_contacts) {
     const a = w.activities.find((a) => a.id === link.activity_id),
@@ -236,6 +248,15 @@ export function applyCommand(
     ]);
     if (Object.keys(command.row).some((k) => !allowed.has(k)))
       fail("未定義の項目です。");
+    if (
+      table === "project_engineers" &&
+      existing &&
+      (existing.project_id !== command.row.project_id ||
+        existing.engineer_id !== command.row.engineer_id)
+    )
+      fail(
+        "参画先・エンジニアは変更できません。紐づけを解除して追加してください。",
+      );
     row = newRow(table);
     row.id = id;
     for (const f of forms[table].fields) {
@@ -264,6 +285,26 @@ export function applyCommand(
     if (table === "tasks")
       row.automation_key = existing?.automation_key || null;
     if (table === "activities") {
+      const previous = w.activity_relations
+        .filter((x) => x.activity_id === id)
+        .map((x) => x.related_activity_id);
+      const related = command.related_activity_ids ?? previous;
+      if (!Array.isArray(related) || new Set(related).size !== related.length)
+        fail("関連活動が重複または不正です。");
+      for (const target of related)
+        if (
+          !previous.includes(target) &&
+          !w.activities.some((a) => a.id === target && !inactive(a))
+        )
+          fail("利用可能な関連活動を選択してください。");
+      w.activity_relations = w.activity_relations
+        .filter((x) => x.activity_id !== id)
+        .concat(
+          related.map((related_activity_id) => ({
+            activity_id: id,
+            related_activity_id,
+          })),
+        );
       const contacts =
         command.contact_ids ??
         w.activity_contacts
@@ -319,6 +360,70 @@ export function applyCommand(
   row.updated_at = now;
   if (existing) list.splice(list.indexOf(existing), 1, row);
   else list.push(row);
+  if (
+    table === "projects" &&
+    command.kind === "save" &&
+    command.engineer_ids !== undefined
+  ) {
+    const ids = command.engineer_ids;
+    if (!Array.isArray(ids) || new Set(ids).size !== ids.length)
+      fail("契約のエンジニアが重複または不正です。");
+    if (ids.length > 1) fail("1契約に紐づけられるエンジニアは1人です。");
+    const assignments = w.project_engineers.filter((x) => x.project_id === id);
+    for (const assignment of assignments.filter(
+      (x) => !inactive(x) && !ids.includes(x.engineer_id),
+    ))
+      Object.assign(
+        w,
+        applyCommand(
+          w,
+          {
+            kind: "lifecycle",
+            table: "project_engineers",
+            id: assignment.id,
+            expected_version: assignment.version,
+            restore: false,
+          },
+          actor,
+        ),
+      );
+    for (const engineer of ids) {
+      const current = assignments.find(
+        (x) => x.engineer_id === engineer && !inactive(x),
+      );
+      if (
+        !current &&
+        !w.engineers.some((e) => e.id === engineer && !inactive(e))
+      )
+        fail("利用可能なエンジニアを選択してください。");
+      if (current) continue;
+      const previous = assignments.find((x) => x.engineer_id === engineer);
+      Object.assign(
+        w,
+        applyCommand(
+          w,
+          previous
+            ? {
+                kind: "lifecycle",
+                table: "project_engineers",
+                id: previous.id,
+                expected_version: previous.version,
+                restore: true,
+              }
+            : {
+                kind: "save",
+                table: "project_engineers",
+                row: newRow("project_engineers", {
+                  project_id: id,
+                  engineer_id: engineer,
+                }),
+                expected_version: 0,
+              },
+          actor,
+        ),
+      );
+    }
+  }
   validateWorkspace(w);
   w.revisions.push({
     id: newId(),
@@ -340,6 +445,22 @@ export function applyCommand(
           .filter((f) => f.ref)
           .map((f) => [f.key, display(w, f, row[f.key])]),
       ),
+      ...(table === "projects"
+        ? {
+            engineer_ids: w.project_engineers
+              .filter((x) => x.project_id === id && !inactive(x))
+              .map((x) => x.engineer_id),
+            participant_labels: Object.fromEntries(
+              w.project_engineers
+                .filter((x) => x.project_id === id && !inactive(x))
+                .map((x) => [
+                  x.engineer_id,
+                  w.engineers.find((e) => e.id === x.engineer_id)?.name ||
+                    x.engineer_id,
+                ]),
+            ),
+          }
+        : {}),
       ...(table === "activities"
         ? {
             participant_labels: Object.fromEntries([
@@ -358,6 +479,18 @@ export function applyCommand(
                     x.engineer_id,
                 ]),
             ]),
+            related_activity_ids: w.activity_relations
+              .filter((x) => x.activity_id === id)
+              .map((x) => x.related_activity_id),
+            related_activity_labels: Object.fromEntries(
+              w.activity_relations
+                .filter((x) => x.activity_id === id)
+                .map((x) => [
+                  x.related_activity_id,
+                  w.activities.find((a) => a.id === x.related_activity_id)!
+                    .title,
+                ]),
+            ),
             contact_ids: w.activity_contacts
               .filter((x) => x.activity_id === id)
               .map((x) => x.contact_id),
@@ -433,22 +566,24 @@ export function runReminders(
     Object.assign(w, next);
   };
   for (const p of w.contract_periods) {
-    const contract = w.contracts.find((c) => c.id === p.contract_id),
-      rel = w.customer_engineer_relations.find(
-        (r) => r.id === contract?.relation_id,
+    const assignment = w.project_engineers.find(
+        (c) => c.id === p.project_engineer_id,
       ),
-      customer = rel?.customer_id || null;
+      project = w.projects.find((x) => x.id === assignment?.project_id),
+      customer = project?.customer_id || null;
     const valid =
       !inactive(p) &&
-      contract &&
-      !inactive(contract) &&
-      rel &&
-      !inactive(rel) &&
-      w.engineers.some((e) => e.id === rel.engineer_id && !inactive(e)) &&
+      assignment &&
+      !inactive(assignment) &&
+      project &&
+      !inactive(project) &&
+      w.engineers.some(
+        (e) => e.id === assignment.engineer_id && !inactive(e),
+      ) &&
       usableCustomer(w, customer) &&
       p.renewal_status === "pending" &&
       p.ends_on >= day &&
-      enabledUser(contract.sales_user_id);
+      enabledUser(project.sales_user_id);
     const key = `renewal:${p.id}`,
       task = w.tasks.find((t) => t.automation_key === key);
     if (!valid) {
@@ -464,10 +599,10 @@ export function runReminders(
     if (!task) {
       const row = newRow("tasks", {
         customer_id: customer!,
-        contract_id: contract.id,
+        project_id: project.id,
         contract_period_id: p.id,
-        assignee_user_id: contract.sales_user_id,
-        title: `${contract.name}の更新確認`,
+        assignee_user_id: project.sales_user_id,
+        title: `${project.name}の更新確認`,
         due_at: `${p.ends_on}T17:00:00+09:00`,
         status: "open",
       });
@@ -475,23 +610,17 @@ export function runReminders(
     } else if (
       !inactive(task) &&
       ["open", "in_progress"].includes(task.status) &&
-      (task.assignee_user_id !== contract.sales_user_id ||
+      (task.assignee_user_id !== project.sales_user_id ||
         Date.parse(task.due_at || "") !==
           Date.parse(`${p.ends_on}T17:00:00+09:00`))
     )
       persistTask({
         ...task,
-        assignee_user_id: contract.sales_user_id,
+        assignee_user_id: project.sales_user_id,
         due_at: `${p.ends_on}T17:00:00+09:00`,
       });
     if (addDays(p.ends_on, -30) <= day)
-      notice(
-        null,
-        p.id,
-        contract.sales_user_id!,
-        "contract_renewal",
-        p.ends_on,
-      );
+      notice(null, p.id, project.sales_user_id!, "contract_renewal", p.ends_on);
   }
   for (const task of w.tasks) {
     if (

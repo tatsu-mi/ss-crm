@@ -1,62 +1,75 @@
 "use client";
-import { MoreHorizontal } from "lucide-react";
-import { Base, Workspace, inactive, titleOf, today } from "@/lib/model";
+import { PencilLine } from "lucide-react";
+import { Base, Workspace, inactive, today } from "@/lib/model";
 import { SaveCell, standardColumn } from "@/lib/sheet-columns";
 import { SheetColumn, Spreadsheet } from "./spreadsheet";
-interface ContractView {
+interface ProjectEngineerView {
   id: string;
   engineer: Base;
-  contract: Base;
+  assignment: Base;
+  project: Base;
   period: Base | null;
 }
-export function ContractEngineers({
+export function ProjectEngineers({
   w,
   customerId,
   saveCell,
   onEdit,
+  onContract,
   onRenew,
   onRelated,
 }: {
   w: Workspace;
   customerId?: string;
   saveCell: SaveCell;
-  onEdit: (table: "contracts" | "contract_periods", row: Base) => void;
+  onContract: (row: Base) => void;
+  onEdit: (table: "project_engineers" | "contract_periods", row: Base) => void;
   onRenew: (p: Base) => void;
   onRelated: (row: Base) => void;
 }) {
-  const rows: ContractView[] = w.contracts
+  const rows: ProjectEngineerView[] = w.project_engineers
     .filter((c) => !inactive(c))
-    .flatMap<ContractView>((contract) => {
-      const rel = w.customer_engineer_relations.find(
-        (r) => r.id === contract.relation_id,
+    .flatMap<ProjectEngineerView>((assignment) => {
+      const project = w.projects.find(
+        (p) => p.id === assignment.project_id && !inactive(p),
       );
-      if (!rel || (customerId && rel.customer_id !== customerId)) return [];
-      const engineer = w.engineers.find((e) => e.id === rel.engineer_id);
+      if (!project || (customerId && project.customer_id !== customerId))
+        return [];
+      const engineer = w.engineers.find((e) => e.id === assignment.engineer_id);
       if (!engineer) return [];
       const periods = w.contract_periods
-        .filter((p) => p.contract_id === contract.id && !inactive(p))
+        .filter((p) => p.project_engineer_id === assignment.id && !inactive(p))
         .sort((a, b) => b.starts_on.localeCompare(a.starts_on));
       return periods.length
         ? periods.map((period) => ({
             id: period.id,
             engineer,
-            contract,
+            assignment,
+            project,
             period,
           }))
-        : [{ id: contract.id, engineer, contract, period: null }];
+        : [
+            {
+              id: assignment.id,
+              engineer,
+              assignment,
+              project,
+              period: null,
+            },
+          ];
     });
   function joined(
     key: string,
     label: string,
-    source: "engineer" | "contract" | "period",
+    source: "engineer" | "project" | "period",
     field: string,
     width: number,
-  ): SheetColumn<ContractView> {
+  ): SheetColumn<ProjectEngineerView> {
     const table =
       source === "engineer"
         ? "engineers"
-        : source === "contract"
-          ? "contracts"
+        : source === "project"
+          ? "projects"
           : "contract_periods";
     const base = standardColumn(w, table, field, saveCell, label, width);
     return {
@@ -71,9 +84,27 @@ export function ContractEngineers({
       save: (r, value) => base.save!(r[source]!, value),
     };
   }
-  const columns: SheetColumn<ContractView>[] = [
+  const columns: SheetColumn<ProjectEngineerView>[] = [
     joined("engineer", "エンジニア名", "engineer", "name", 130),
-    joined("name", "契約名", "contract", "name", 190),
+    {
+      key: "name",
+      label: "契約名",
+      width: 190,
+      value: (row) => row.project.name,
+      render: (row) => (
+        <button
+          type="button"
+          className="text-button"
+          aria-label={`${row.project.name}の契約を開く`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onContract(row.project);
+          }}
+        >
+          {String(row.project.name)}
+        </button>
+      ),
+    },
     joined("billing", "請求単価", "period", "billing_rate", 110),
     joined("cost", "原価", "period", "cost", 110),
     joined("start", "開始日", "period", "starts_on", 115),
@@ -92,7 +123,7 @@ export function ContractEngineers({
               : "契約中",
     },
     joined("renewal", "更新確認", "period", "renewal_status", 100),
-    joined("sales", "担当者", "contract", "sales_user_id", 100),
+    joined("sales", "営業", "project", "sales_user_id", 100),
     {
       key: "actions",
       label: "操作",
@@ -102,12 +133,14 @@ export function ContractEngineers({
           <button
             className="text-button"
             onClick={() =>
-              r.period ? onRenew(r.period) : onEdit("contracts", r.contract)
+              r.period
+                ? onRenew(r.period)
+                : onEdit("project_engineers", r.assignment)
             }
           >
             {r.period ? "更新" : "期間を登録"}
           </button>
-          <button className="text-button" onClick={() => onRelated(r.contract)}>
+          <button className="text-button" onClick={() => onRelated(r.project)}>
             活動履歴
           </button>
         </span>
@@ -116,22 +149,22 @@ export function ContractEngineers({
   ];
   return (
     <Spreadsheet
-      label="契約エンジニア一覧"
+      label="参画エンジニア一覧"
       rows={rows}
       columns={columns}
       rowLabel={(r) => String(r.engineer.name)}
       actions={(r) => (
         <button
           className="cell-action"
-          aria-label={`${r.engineer.name}の契約詳細・履歴`}
+          aria-label={`${r.engineer.name}の参画期間を編集`}
           onClick={() =>
             onEdit(
-              r.period ? "contract_periods" : "contracts",
-              r.period || r.contract,
+              r.period ? "contract_periods" : "project_engineers",
+              r.period || r.assignment,
             )
           }
         >
-          <MoreHorizontal size={15} />
+          <PencilLine size={15} />
         </button>
       )}
     />

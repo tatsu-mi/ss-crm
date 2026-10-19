@@ -1,5 +1,9 @@
+import {
+  projectCopyCommand,
+  projectCopyDefaults,
+} from "../src/lib/project-copy";
 import { PGlite } from "@electric-sql/pglite";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { demoWorkspace } from "../src/lib/demo";
 import {
@@ -16,11 +20,22 @@ async function main() {
   await db.exec(
     `create role anon; create role authenticated; create role service_role bypassrls; create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$; grant usage on schema auth to authenticated,service_role; grant execute on function auth.uid() to authenticated,service_role;`,
   );
-  for (const file of readdirSync("supabase/migrations")
-    .filter((f) => f.endsWith(".sql"))
-    .sort())
-    await db.exec(readFileSync(`supabase/migrations/${file}`, "utf8"));
+  await db.exec(
+    readFileSync("supabase/migrations/202610190001_crm.sql", "utf8"),
+  );
   await db.exec(readFileSync("supabase/seed.sql", "utf8"));
+  assert.deepEqual(
+    (
+      await db.query<{ name: string }>(
+        "select name from activity_kinds order by display_order",
+      )
+    ).rows.map((k) => k.name),
+    ["商談", "面談", "その他"],
+  );
+  await assert.rejects(
+    db.query("insert into activity_kinds(name,display_order) values('提案',4)"),
+    /check constraint/,
+  );
   const w = demoWorkspace();
   for (const user of w.users) {
     await db.query("insert into auth.users values($1)", [user.id]);
@@ -53,7 +68,80 @@ async function main() {
         : {}),
     });
   for (const table of tableNames)
-    for (const row of w[table]) if (!row.automation_key) await save(table, row);
+    for (const row of w[table])
+      if (table !== "activity_templates" && !row.automation_key)
+        await save(table, row);
+  const seededTemplates = (
+    await db.query<{ id: string; name: string; body: string }>(
+      "select id,name,body from activity_templates order by id",
+    )
+  ).rows;
+  assert.deepEqual(
+    seededTemplates,
+    w.activity_templates
+      .map(({ id, name, body }) => ({ id, name, body }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+  );
+  const template = newRow("activity_templates", {
+    name: "定例会",
+    body: "## 議題\n\n- 確認",
+  });
+  await save("activity_templates", template);
+  await save("activity_templates", { ...template, body: "## 更新済み" }, 1);
+  await assert.rejects(
+    save("activity_templates", { ...template, body: "古い編集" }, 1),
+    /他の利用者/,
+  );
+  for (const body of [null, " ", "x".repeat(20001)])
+    await assert.rejects(save("activity_templates", { ...template, body }, 2));
+  assert.equal(
+    (
+      await db.query<{ body: string }>(
+        "select body from activity_templates where id=$1",
+        [template.id],
+      )
+    ).rows[0].body,
+    "## 更新済み",
+  );
+  assert.equal(
+    (
+      await db.query<{ snapshot: { row: { body: string } } }>(
+        "select snapshot from activity_templates_revisions where entity_id=$1 and version=1",
+        [template.id],
+      )
+    ).rows[0].snapshot.row.body,
+    template.body,
+  );
+  await mutate({
+    kind: "lifecycle",
+    table: "activity_templates",
+    id: template.id,
+    expected_version: 2,
+    restore: false,
+  });
+  await assert.rejects(save("activity_templates", template, 3), /復元/);
+  await mutate({
+    kind: "lifecycle",
+    table: "activity_templates",
+    id: template.id,
+    expected_version: 3,
+    restore: true,
+  });
+  assert.equal(
+    (
+      await db.query<{ deleted_at: string | null }>(
+        "select deleted_at from activity_templates where id=$1",
+        [template.id],
+      )
+    ).rows[0].deleted_at,
+    null,
+  );
+  await assert.rejects(
+    db.query("update activity_templates set body='直接変更' where id=$1", [
+      template.id,
+    ]),
+    /permission denied/,
+  );
   assert.equal((await db.query("select * from projects")).rows.length, 1);
   assert.equal(
     (
@@ -83,12 +171,16 @@ async function main() {
     engineer_id: w.engineers[0].id,
     label: "一括保存の検証",
   });
-  const contract = newRow("contracts", {
-    relation_id: relation.id,
-    name: "一括保存の契約",
+  const batchProject = newRow("projects", {
+    customer_id: w.customers[0].id,
+    name: "一人一契約の一括登録",
+  });
+  const contract = newRow("project_engineers", {
+    project_id: batchProject.id,
+    engineer_id: w.engineers[1].id,
   });
   const period = newRow("contract_periods", {
-    contract_id: contract.id,
+    project_engineer_id: contract.id,
     starts_on: "2027-04-01",
     ends_on: "2027-03-31",
     billing_rate: "800000",
@@ -96,13 +188,19 @@ async function main() {
     renewal_status: "pending",
   });
   const commands: Command[] = [
+    { kind: "save", table: "projects", row: batchProject, expected_version: 0 },
     {
       kind: "save",
       table: "customer_engineer_relations",
       row: relation,
       expected_version: 0,
     },
-    { kind: "save", table: "contracts", row: contract, expected_version: 0 },
+    {
+      kind: "save",
+      table: "project_engineers",
+      row: contract,
+      expected_version: 0,
+    },
     {
       kind: "save",
       table: "contract_periods",
@@ -112,8 +210,11 @@ async function main() {
   ];
   await assert.rejects(mutate({ kind: "batch", commands }), /check constraint/);
   assert.equal(
-    (await db.query("select * from contracts where id=$1", [contract.id])).rows
-      .length,
+    (
+      await db.query("select * from project_engineers where id=$1", [
+        contract.id,
+      ])
+    ).rows.length,
     0,
   );
   assert.equal(
@@ -128,9 +229,10 @@ async function main() {
   await mutate({ kind: "batch", commands });
   assert.equal(
     (
-      await db.query("select * from contract_periods where contract_id=$1", [
-        contract.id,
-      ])
+      await db.query(
+        "select * from contract_periods where project_engineer_id=$1",
+        [contract.id],
+      )
     ).rows.length,
     1,
   );
@@ -141,7 +243,7 @@ async function main() {
     /check constraint/,
   );
   const next = newRow("contract_periods", {
-    contract_id: p.contract_id,
+    project_engineer_id: p.project_engineer_id,
     starts_on: addDays(p.ends_on, 1),
     ends_on: addDays(p.ends_on, 90),
     billing_rate: "820000.25",
@@ -182,10 +284,7 @@ async function main() {
     ),
     /別の顧客/,
   );
-  await assert.rejects(
-    save("deals", { ...w.deals[0], stage: "lost" }, 1),
-    /受注商談/,
-  );
+
   await assert.rejects(
     save("engineers", { ...w.engineers[0], skills: "Java" }, 1),
     /未定義/,
@@ -199,8 +298,8 @@ async function main() {
   );
   const contractSnapshot = (
     await db.query<{ snapshot: { reference_labels: { project_id: string } } }>(
-      "select snapshot from contracts_revisions where entity_id=$1",
-      [w.contracts[0].id],
+      "select snapshot from project_engineers_revisions where entity_id=$1",
+      [w.project_engineers[0].id],
     )
   ).rows[0].snapshot;
   assert.equal(
@@ -241,6 +340,18 @@ async function main() {
     /重複/,
   );
   const a = w.activities[0];
+  assert.equal(
+    (
+      await db.query(
+        "select attname from pg_attribute where attrelid='public.activities'::regclass and attname='deal_id' and not attisdropped",
+      )
+    ).rows.length,
+    0,
+  );
+  await assert.rejects(
+    save("activities", { ...a, deal_id: w.deals[0].id }, 1),
+    /未定義/,
+  );
   await mutate({
     kind: "save",
     table: "activities",
@@ -284,6 +395,110 @@ async function main() {
     ).rows.length,
     0,
   );
+  const foreignActivity = newRow("activities", {
+    ...a,
+    id: newId(),
+    customer_id: w.customers.find((c) => c.id !== a.customer_id)!.id,
+    project_id: null,
+  });
+  await mutate({
+    kind: "save",
+    table: "activities",
+    row: foreignActivity,
+    expected_version: 0,
+  });
+  const relatedTargets = w.activities
+    .filter((x) => x.customer_id === a.customer_id && x.id !== a.id)
+    .slice(0, 2);
+  const relatedIds = relatedTargets.map((x) => x.id);
+  const markdownBody = "## 決定事項\n\n- **継続**";
+  await mutate({
+    kind: "save",
+    table: "activities",
+    row: { ...a, body: markdownBody },
+    expected_version: 2,
+    related_activity_ids: relatedIds,
+  });
+  assert.equal(
+    (
+      await db.query("select * from activity_relations where activity_id=$1", [
+        a.id,
+      ])
+    ).rows.length,
+    2,
+  );
+  await mutate({
+    kind: "save",
+    table: "activities",
+    row: { ...a, body: markdownBody, title: "別項目を更新" },
+    expected_version: 3,
+  });
+  assert.equal(
+    (
+      await db.query("select * from activity_relations where activity_id=$1", [
+        a.id,
+      ])
+    ).rows.length,
+    2,
+  );
+  for (const ids of [
+    [a.id],
+    [relatedIds[0], relatedIds[0]],
+    [foreignActivity.id],
+  ]) {
+    await assert.rejects(
+      mutate({
+        kind: "save",
+        table: "activities",
+        row: { ...a, body: "保存されない内容" },
+        expected_version: 4,
+        related_activity_ids: ids,
+      }),
+    );
+  }
+  assert.equal(
+    (
+      await db.query<{ body: string }>(
+        "select body from activities where id=$1",
+        [a.id],
+      )
+    ).rows[0].body,
+    markdownBody,
+  );
+  const relatedHistory = (
+    await db.query<{
+      snapshot: {
+        related_activity_ids: string[];
+        related_activity_labels: Record<string, string>;
+      };
+    }>(
+      "select snapshot from activities_revisions where entity_id=$1 and version=3",
+      [a.id],
+    )
+  ).rows[0].snapshot;
+  assert.deepEqual(
+    relatedHistory.related_activity_ids.sort(),
+    [...relatedIds].sort(),
+  );
+  assert.equal(
+    relatedHistory.related_activity_labels[relatedIds[0]],
+    relatedTargets[0].title,
+  );
+  await mutate({
+    kind: "save",
+    table: "activities",
+    row: { ...a, body: markdownBody },
+    expected_version: 4,
+    related_activity_ids: [],
+  });
+  assert.equal(
+    (
+      await db.query("select * from activity_relations where activity_id=$1", [
+        a.id,
+      ])
+    ).rows.length,
+    0,
+  );
   await db.exec("reset role");
   await db.query("select set_config('request.jwt.claim.sub','',false)");
   await db.exec("set role service_role");
@@ -318,11 +533,7 @@ async function main() {
   ).rows[0];
   assert.ok(notification);
   await mutate({ kind: "read_notification", id: notification.id });
-  await save(
-    "contracts",
-    { ...w.contracts[0], sales_user_id: w.users[1].id },
-    1,
-  );
+  await save("projects", { ...w.projects[0], sales_user_id: w.users[1].id }, 1);
   await db.exec("reset role");
   await db.query("select set_config('request.jwt.claim.sub','',false)");
   await db.exec("set role service_role");
@@ -378,10 +589,166 @@ async function main() {
   );
   await db.exec("reset role");
   await db.query("select set_config('request.jwt.claim.sub',$1,false)", [
+    actor,
+  ]);
+  await db.exec("set role authenticated");
+  const project = newRow("projects", {
+    customer_id: w.customers[0].id,
+    name: "複数参画のDB検証",
+  });
+  const ids = [w.engineers[0].id];
+  await mutate({
+    kind: "save",
+    table: "projects",
+    row: project,
+    expected_version: 0,
+    engineer_ids: ids,
+  });
+  await assert.rejects(
+    mutate({
+      kind: "save",
+      table: "projects",
+      row: project,
+      expected_version: 1,
+      engineer_ids: w.engineers.map((e) => e.id),
+    }),
+    /1人/,
+  );
+  const memberships = (
+    await db.query<{ id: string }>(
+      "select id from project_engineers where project_id=$1 order by id",
+      [project.id],
+    )
+  ).rows;
+  assert.equal(memberships.length, 1);
+  await assert.rejects(
+    mutate({
+      kind: "save",
+      table: "projects",
+      row: project,
+      expected_version: 1,
+      engineer_ids: [newId()],
+    }),
+    /利用可能/,
+  );
+  assert.equal(
+    (
+      await db.query<{ version: number }>(
+        "select version from projects where id=$1",
+        [project.id],
+      )
+    ).rows[0].version,
+    1,
+  );
+  await assert.rejects(
+    mutate({
+      kind: "save",
+      table: "projects",
+      row: project,
+      expected_version: 1,
+      engineer_ids: [ids[0], ids[0]],
+    }),
+    /重複/,
+  );
+  await mutate({
+    kind: "save",
+    table: "projects",
+    row: project,
+    expected_version: 1,
+    engineer_ids: [],
+  });
+  assert.equal(
+    (
+      await db.query(
+        "select * from project_engineers where project_id=$1 and deleted_at is null",
+        [project.id],
+      )
+    ).rows.length,
+    0,
+  );
+  await mutate({
+    kind: "save",
+    table: "projects",
+    row: project,
+    expected_version: 2,
+    engineer_ids: ids,
+  });
+  assert.deepEqual(
+    (
+      await db.query(
+        "select id from project_engineers where project_id=$1 and deleted_at is null order by id",
+        [project.id],
+      )
+    ).rows,
+    memberships,
+  );
+  const membershipHistory = (
+    await db.query<{ snapshot: { engineer_ids: string[] } }>(
+      "select snapshot from projects_revisions where entity_id=$1 and version=3",
+      [project.id],
+    )
+  ).rows[0].snapshot;
+  assert.deepEqual(membershipHistory.engineer_ids, [...ids].sort());
+  await mutate({
+    kind: "save",
+    table: "projects",
+    row: project,
+    expected_version: 3,
+    engineer_ids: [w.engineers[1].id],
+  });
+  assert.equal(
+    (
+      await db.query<{ engineer_id: string }>(
+        "select engineer_id from project_engineers where project_id=$1 and deleted_at is null",
+        [project.id],
+      )
+    ).rows[0].engineer_id,
+    w.engineers[1].id,
+  );
+  const defaults = projectCopyDefaults(w, w.projects[0].id);
+  const copy = newRow("projects", {
+    customer_id: w.customers[0].id,
+    name: "複製した契約",
+  });
+  await mutate(projectCopyCommand(copy, w.engineers[1].id, defaults.period));
+  assert.equal(
+    (
+      await db.query<{ rate: string }>(
+        "select cp.billing_rate::text as rate from contract_periods cp join project_engineers pe on pe.id=cp.project_engineer_id where pe.project_id=$1",
+        [copy.id],
+      )
+    ).rows[0].rate,
+    "800000.00",
+  );
+  const invalidCopy = newRow("projects", {
+    customer_id: w.customers[0].id,
+    name: "失敗する複製",
+  });
+  await assert.rejects(
+    mutate(
+      projectCopyCommand(invalidCopy, w.engineers[1].id, {
+        ...defaults.period!,
+        starts_on: "2099-01-01",
+      }),
+    ),
+    /check constraint/,
+  );
+  assert.equal(
+    (await db.query("select * from projects where id=$1", [invalidCopy.id]))
+      .rows.length,
+    0,
+  );
+  await db.exec("reset role");
+  await db.query("select set_config('request.jwt.claim.sub',$1,false)", [
     newId(),
   ]);
   await db.exec("set role authenticated");
   assert.equal((await db.query("select * from customers")).rows.length, 0);
+  assert.equal(
+    (await db.query("select * from activity_templates")).rows.length,
+    0,
+  );
+  await assert.rejects(save("activity_templates", template, 4), /利用登録/);
   await assert.rejects(save("customers", c, 2), /利用登録/);
   await db.exec("reset role; set role anon");
   await assert.rejects(
