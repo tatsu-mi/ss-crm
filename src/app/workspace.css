@@ -381,7 +381,8 @@
 .sheet {
   table-layout: fixed;
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   white-space: nowrap;
   font-size: 12px;
   line-height: 1.45;
@@ -397,12 +398,14 @@
   font-weight: 600;
   height: 29px;
   border: 1px solid #d3d7dc;
+  border-left-width: 0;
   padding: 3px 8px;
 }
 .sheet td {
   padding: 3px 8px;
   height: 29px;
   border: 1px solid #e0e3e7;
+  border-width: 0 1px 1px 0;
   font-size: 12px;
   color: #333;
   max-width: 0;
@@ -410,6 +413,13 @@
   text-overflow: ellipsis;
   vertical-align: middle;
   position: relative;
+}
+.sheet th:first-child,
+.sheet:not(.sheet-no-header) td:first-child {
+  border-left-width: 1px;
+}
+.sheet-no-header tr:first-child td {
+  border-top-width: 1px;
 }
 .sheet tr:hover td {
   background: #f6faff;
