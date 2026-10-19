@@ -330,7 +330,7 @@ test("large decimal amounts display without binary rounding", () => {
   assert.equal(
     display(
       demoWorkspace(),
-      { key: "budget", label: "希望単価", type: "money" },
+      { key: "budget", label: "単価", type: "money" },
       "9999999999999999.99",
     ),
     "¥9,999,999,999,999,999.99",

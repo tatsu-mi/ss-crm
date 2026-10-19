@@ -105,9 +105,8 @@ erDiagram
         uuid sales_user_id FK "営業ID"
         string name "契約名"
         text description "概要"
-        text required_skills "必要スキル"
-        decimal budget "希望単価"
-        date planned_start_on "参画予定日"
+        decimal budget "単価"
+        date planned_start_on "参画開始日"
         datetime deleted_at "論理削除日時"
     }
     CONTRACT_ENGINEER {

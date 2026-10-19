@@ -46,7 +46,6 @@ export interface Project extends Base {
   customer_id: string;
   name: string;
   description: string | null;
-  required_skills: string | null;
   budget: string | null;
   planned_start_on: string | null;
   sales_user_id: string | null;

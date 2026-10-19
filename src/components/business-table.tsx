@@ -38,9 +38,8 @@ const columns: Record<Table, [string, string?, number?][]> = {
   projects: [
     ["name", "契約名", 190],
     ["description", "概要", 200],
-    ["required_skills", "必要スキル", 150],
-    ["budget", "希望単価", 110],
-    ["planned_start_on", "参画予定日", 120],
+    ["budget", "単価", 110],
+    ["planned_start_on", "参画開始日", 120],
   ],
   deals: [
     ["title", "商談名", 190],

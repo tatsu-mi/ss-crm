@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -11,6 +12,10 @@ const port = Number(process.env.PORT || 3000);
 const children = new Set();
 let temporaryDirectory;
 let stopping = false;
+let app;
+let restarting = false;
+let input;
+const origin = `http://127.0.0.1:${port}`;
 
 function launch(command, args) {
   const child = spawn(command, args, {
@@ -39,6 +44,7 @@ function signalChild(child, signal) {
 async function finish(code) {
   if (stopping) return;
   stopping = true;
+  input?.close();
   for (const child of children) signalChild(child, "SIGTERM");
   const timer = setTimeout(() => {
     for (const child of children) signalChild(child, "SIGKILL");
@@ -64,6 +70,82 @@ async function run(command, args) {
     throw new Error(
       `${command} が終了しました (${result.signal || result.code})`,
     );
+  }
+}
+
+async function stopApp() {
+  if (!app) return;
+  const child = app;
+  app = undefined;
+  signalChild(child, "SIGTERM");
+  const timer = setTimeout(() => signalChild(child, "SIGKILL"), 5000);
+  await child.finished;
+  clearTimeout(timer);
+  children.delete(child);
+}
+
+async function startApp() {
+  const child = launch(process.execPath, [
+    "node_modules/next/dist/bin/next",
+    "start",
+    "--hostname",
+    "127.0.0.1",
+    "--port",
+    String(port),
+  ]);
+  app = child;
+  void child.finished.then(() => {
+    if (!stopping && !restarting && app === child) {
+      console.error(
+        "CRMが停止しました。公開URLは維持しています。r + Enterで再起動できます。",
+      );
+    }
+  });
+  const deadline = Date.now() + 60_000;
+  while (!stopping) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error("CRMが起動前に終了しました。");
+    }
+    try {
+      const response = await fetch(origin, {
+        signal: AbortSignal.timeout(1000),
+      });
+      await response.body?.cancel();
+      if (response.ok) return;
+    } catch {
+      // 起動完了まで待つ。
+    }
+    if (Date.now() >= deadline) {
+      throw new Error("60秒以内にCRMの起動を確認できませんでした。");
+    }
+    await delay(250);
+  }
+}
+
+async function restartApp() {
+  if (stopping || restarting) return;
+  restarting = true;
+  try {
+    console.log(
+      "公開URLを維持してCRMを更新します。ビルド・再起動中はアクセスできません。",
+    );
+    // 稼働中のNext.jsが使う.nextをビルドで上書きする前に停止する。
+    await stopApp();
+    if (stopping) return;
+    await run("npm", ["run", "build"]);
+    if (stopping) return;
+    await startApp();
+    if (!stopping)
+      console.log("CRMの更新が完了しました。同じ公開URLでアクセスできます。");
+  } catch (error) {
+    if (!stopping) {
+      await stopApp();
+      console.error(
+        `${error.message}\n公開URLは維持しています。修正後、r + Enterで再試行してください。`,
+      );
+    }
+  } finally {
+    restarting = false;
   }
 }
 
@@ -99,35 +181,7 @@ async function main() {
   await run("npm", ["run", "build"]);
   if (stopping) return;
 
-  const app = launch(process.execPath, [
-    "node_modules/next/dist/bin/next",
-    "start",
-    "--hostname",
-    "127.0.0.1",
-    "--port",
-    String(port),
-  ]);
-  const origin = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 60_000;
-  while (true) {
-    if (stopping) return;
-    if (app.exitCode !== null || app.signalCode !== null) {
-      throw new Error("CRMが起動前に終了しました。");
-    }
-    try {
-      const response = await fetch(origin, {
-        signal: AbortSignal.timeout(1000),
-      });
-      await response.body?.cancel();
-      if (response.ok) break;
-    } catch {
-      // 起動完了まで待つ。
-    }
-    if (Date.now() >= deadline) {
-      throw new Error("60秒以内にCRMの起動を確認できませんでした。");
-    }
-    await delay(250);
-  }
+  await startApp();
   if (stopping) return;
 
   // Named Tunnelの既存設定を読み込まず、変更もしない。
@@ -139,7 +193,7 @@ async function main() {
     "Quick Tunnelを起動します。ログのhttps://….trycloudflare.comが公開URLです。",
   );
   console.log(
-    "終了するにはCtrl+Cを押してください。公開URLは起動ごとに変わります。",
+    "r + EnterでCRMだけ再ビルド・再起動します。Ctrl+Cで公開を終了します。",
   );
   const tunnel = launch("cloudflared", [
     "tunnel",
@@ -148,11 +202,14 @@ async function main() {
     "--url",
     origin,
   ]);
-  const result = await Promise.race([app.finished, tunnel.finished]);
+  input = createInterface({ input: process.stdin });
+  input.on("line", (line) => {
+    if (line.trim().toLowerCase() === "r") void restartApp();
+  });
+  const result = await tunnel.finished;
   if (!stopping) {
     throw (
-      result.error ||
-      new Error("CRMまたはQuick Tunnelが終了したため公開を停止します。")
+      result.error || new Error("Quick Tunnelが終了したため公開を停止します。")
     );
   }
 }

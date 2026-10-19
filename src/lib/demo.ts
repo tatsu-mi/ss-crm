@@ -110,7 +110,6 @@ export function demoWorkspace(): Workspace {
     name: "基幹システム刷新",
     sales_user_id: w.users[0].id,
     description: "販売管理システムの刷新",
-    required_skills: "Java、PostgreSQL",
     budget: "800000",
     planned_start_on: addDays(day, -30),
   });

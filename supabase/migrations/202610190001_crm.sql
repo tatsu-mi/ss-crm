@@ -76,7 +76,6 @@ create table public.projects(
   customer_id uuid references public.customers(id) not null,
   name text not null check(name is null or length(trim(name)) between 1 and 20000),
   description text check(description is null or length(trim(description)) between 1 and 20000),
-  required_skills text check(required_skills is null or length(trim(required_skills)) between 1 and 20000),
   budget numeric(18,2) check(budget>=0),
   planned_start_on date,
   sales_user_id uuid references public.app_users(id)
