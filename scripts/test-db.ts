@@ -23,6 +23,22 @@ async function main() {
   await db.exec(
     readFileSync("supabase/migrations/202610190001_crm.sql", "utf8"),
   );
+  assert.deepEqual(
+    (
+      await db.query(
+        "select to_regclass('public.deals') as deals, to_regclass('public.deals_revisions') as revisions",
+      )
+    ).rows,
+    [{ deals: null, revisions: null }],
+  );
+  assert.equal(
+    (
+      await db.query(
+        "select attname from pg_attribute where attrelid='public.tasks'::regclass and attname='deal_id' and not attisdropped",
+      )
+    ).rows.length,
+    0,
+  );
   await db.exec(readFileSync("supabase/seed.sql", "utf8"));
   assert.deepEqual(
     (
@@ -261,10 +277,6 @@ async function main() {
     "820000.25",
   );
   await assert.rejects(
-    save("deals", { ...w.deals[0], customer_id: w.customers[1].id }, 1),
-    /別の顧客/,
-  );
-  await assert.rejects(
     save("projects", { ...w.projects[0], customer_id: w.customers[1].id }, 1),
     /別の顧客/,
   );
@@ -275,14 +287,6 @@ async function main() {
       1,
     ),
     /参加者/,
-  );
-  await assert.rejects(
-    save(
-      "customer_engineer_relations",
-      { ...w.customer_engineer_relations[0], customer_id: w.customers[1].id },
-      1,
-    ),
-    /別の顧客/,
   );
 
   await assert.rejects(
@@ -349,7 +353,7 @@ async function main() {
     0,
   );
   await assert.rejects(
-    save("activities", { ...a, deal_id: w.deals[0].id }, 1),
+    save("activities", { ...a, deal_id: newId() }, 1),
     /未定義/,
   );
   await mutate({
@@ -737,6 +741,48 @@ async function main() {
     (await db.query("select * from projects where id=$1", [invalidCopy.id]))
       .rows.length,
     0,
+  );
+  const negotiation = newRow("activities", {
+    customer_id: w.customers[0].id,
+    title: "商談の記録",
+    activity_kind_id: w.activity_kinds.find((k) => k.name === "商談")!.id,
+    recorded_by: w.users[0].id,
+    project_id: copy.id,
+  });
+  await save("activities", negotiation);
+  const followup = newRow("tasks", {
+    customer_id: negotiation.customer_id,
+    title: "商談の次回対応",
+    activity_id: negotiation.id,
+    contract_period_id: (
+      await db.query<{ id: string }>(
+        "select cp.id from contract_periods cp join project_engineers pe on pe.id=cp.project_engineer_id where pe.project_id=$1",
+        [copy.id],
+      )
+    ).rows[0].id,
+  });
+  await assert.rejects(
+    save("tasks", { ...followup, deal_id: newId() }),
+    /未定義/,
+  );
+  await save("tasks", followup);
+  assert.equal(
+    (
+      await db.query<{ activity_id: string }>(
+        "select activity_id from tasks where id=$1",
+        [followup.id],
+      )
+    ).rows[0].activity_id,
+    negotiation.id,
+  );
+  const otherProject = newRow("projects", {
+    customer_id: negotiation.customer_id,
+    name: "別の契約",
+  });
+  await save("projects", otherProject);
+  await assert.rejects(
+    save("activities", { ...negotiation, project_id: otherProject.id }, 1),
+    /タスクの契約・契約期間・活動/,
   );
   await db.exec("reset role");
   await db.query("select set_config('request.jwt.claim.sub',$1,false)", [

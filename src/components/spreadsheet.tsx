@@ -1,5 +1,11 @@
 "use client";
-import { useRef, useState, type ReactNode, type KeyboardEvent } from "react";
+import {
+  useRef,
+  useState,
+  type ReactNode,
+  type KeyboardEvent,
+  type PointerEvent,
+} from "react";
 import { ArrowUpDown, ArrowDown, ArrowUp } from "lucide-react";
 import { Input } from "@/lib/forms";
 import { Value } from "@/lib/model";
@@ -38,6 +44,7 @@ export function Spreadsheet<R extends { id: string }>({
   selectedId,
   actions,
   hideHeader = false,
+  defaultSort,
   empty = "データはありません",
 }: {
   label: string;
@@ -48,6 +55,7 @@ export function Spreadsheet<R extends { id: string }>({
   selectedId?: string;
   actions?: (row: R) => ReactNode;
   hideHeader?: boolean;
+  defaultSort?: { key: string; direction: 1 | -1 };
   empty?: string;
 }) {
   const root = useRef<HTMLDivElement>(null),
@@ -65,8 +73,66 @@ export function Spreadsheet<R extends { id: string }>({
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const [sort, setSort] = useState<{ key: string; direction: 1 | -1 } | null>(
-    null,
+    defaultSort ?? null,
   );
+  const [widthsByLabel, setWidthsByLabel] = useState<
+    Record<string, Record<string, number>>
+  >({});
+  const widths = widthsByLabel[label] || {};
+  const resizing = useRef<{
+    key: string;
+    x: number;
+    width: number;
+  } | null>(null);
+  function columnWidth(column: SheetColumn<R>) {
+    return widths[column.key] ?? column.width ?? 100;
+  }
+  function setWidth(key: string, width: number) {
+    setWidthsByLabel((old) => ({
+      ...old,
+      [label]: { ...old[label], [key]: Math.max(32, Math.round(width)) },
+    }));
+  }
+  function resizeHandle(key: string, name: string, width: number) {
+    return (
+      <span
+        className="sheet-column-resizer"
+        role="separator"
+        aria-label={`${name || "操作"}列の幅`}
+        aria-orientation="vertical"
+        aria-valuemin={32}
+        aria-valuenow={width}
+        tabIndex={0}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+            e.preventDefault();
+            e.stopPropagation();
+            setWidth(key, width + (e.key === "ArrowRight" ? 10 : -10));
+          }
+        }}
+        onPointerDown={(e: PointerEvent<HTMLSpanElement>) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          resizing.current = { key, x: e.clientX, width };
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          const drag = resizing.current;
+          if (drag?.key === key) setWidth(key, drag.width + e.clientX - drag.x);
+        }}
+        onPointerUp={(e) => {
+          resizing.current = null;
+          if (e.currentTarget.hasPointerCapture(e.pointerId))
+            e.currentTarget.releasePointerCapture(e.pointerId);
+        }}
+        onPointerCancel={() => (resizing.current = null)}
+        onLostPointerCapture={() => (resizing.current = null)}
+      />
+    );
+  }
   const sortColumn = columns.find((c) => c.key === sort?.key);
   const rows =
     sort && sortColumn?.value
@@ -233,27 +299,40 @@ export function Spreadsheet<R extends { id: string }>({
           aria-label={label}
           className={`sheet ${hideHeader ? "sheet-no-header" : ""}`}
           style={{
+            width: columns.reduce(
+              (n, c) => n + columnWidth(c),
+              actions ? (widths["__actions"] ?? 32) : 0,
+            ),
             minWidth: columns.reduce(
-              (n, c) => n + (c.width || 100),
-              actions ? 32 : 0,
+              (n, c) => n + columnWidth(c),
+              actions ? (widths["__actions"] ?? 32) : 0,
             ),
           }}
           aria-busy={busy}
         >
           <colgroup>
-            {actions && <col style={{ width: 32 }} />}
+            {actions && <col style={{ width: widths["__actions"] ?? 32 }} />}
             {columns.map((c) => (
-              <col key={c.key} style={{ width: c.width }} />
+              <col key={c.key} style={{ width: columnWidth(c) }} />
             ))}
           </colgroup>
           {!hideHeader && (
             <thead>
               <tr>
-                {actions && <th aria-label="行の操作" />}
+                {actions && (
+                  <th aria-label="行の操作">
+                    {resizeHandle(
+                      "__actions",
+                      "行の操作",
+                      widths["__actions"] ?? 32,
+                    )}
+                  </th>
+                )}
                 {columns.map((c) => (
                   <th
                     key={c.key}
                     scope="col"
+                    aria-label={c.label || "操作"}
                     aria-sort={
                       sort?.key === c.key
                         ? sort.direction === 1
@@ -289,20 +368,32 @@ export function Spreadsheet<R extends { id: string }>({
                     ) : (
                       c.label
                     )}
+                    {resizeHandle(c.key, c.label, columnWidth(c))}
                   </th>
                 ))}
               </tr>
             </thead>
           )}
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row, rowIndex) => (
               <tr
                 key={row.id}
                 data-row-id={row.id}
                 className={selectedId === row.id ? "selected" : ""}
                 onClick={() => onSelect?.(row)}
               >
-                {actions && <td className="sheet-actions">{actions(row)}</td>}
+                {actions && (
+                  <td className="sheet-actions">
+                    {actions(row)}
+                    {hideHeader &&
+                      rowIndex === 0 &&
+                      resizeHandle(
+                        "__actions",
+                        "行の操作",
+                        widths["__actions"] ?? 32,
+                      )}
+                  </td>
+                )}
                 {columns.map((column) => {
                   const active =
                     edit?.row.id === row.id && edit.column.key === column.key;
@@ -435,6 +526,13 @@ export function Spreadsheet<R extends { id: string }>({
                       ) : (
                         String(column.value?.(row) ?? "—")
                       )}
+                      {hideHeader &&
+                        rowIndex === 0 &&
+                        resizeHandle(
+                          column.key,
+                          column.label,
+                          columnWidth(column),
+                        )}
                     </td>
                   );
                 })}

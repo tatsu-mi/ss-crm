@@ -760,8 +760,25 @@
   font: inherit;
   color: inherit;
   padding: 0;
+  overflow: hidden;
 }
 .sheet th > button svg {
   flex-shrink: 0;
   color: #7d8994;
+}
+.sheet-column-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 3;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.sheet-column-resizer:hover,
+.sheet-column-resizer:focus-visible {
+  background: #2563eb55;
+  outline: none;
 }

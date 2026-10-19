@@ -2,6 +2,77 @@ import { test, expect, type Page } from "@playwright/test";
 const customer = "株式会社BLUEPRINT";
 const grid = (page: Page, name: string) =>
   page.getByRole("grid", { name, exact: true });
+test("table columns resize without sorting and contracts use the requested order", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const customers = grid(page, "取引先一覧");
+  const name = customers.getByRole("columnheader", {
+    name: "取引先名",
+    exact: true,
+  });
+  const phone = customers.getByRole("columnheader", {
+    name: "電話番号",
+    exact: true,
+  });
+  const before = (await name.boundingBox())!;
+  const phoneWidth = (await phone.boundingBox())!.width;
+  const handle = customers.getByRole("separator", { name: "取引先名列の幅" });
+  const bounds = (await handle.boundingBox())!;
+  await page.mouse.move(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    bounds.x + bounds.width / 2 + 80,
+    bounds.y + bounds.height / 2,
+  );
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await name.boundingBox())!.width)
+    .toBeCloseTo(before.width + 80, 0);
+  expect((await phone.boundingBox())!.width).toBeCloseTo(phoneWidth, 0);
+  await expect(name).not.toHaveAttribute("aria-sort");
+  await handle.focus();
+  await handle.press("ArrowLeft");
+  await expect
+    .poll(async () => (await name.boundingBox())!.width)
+    .toBeCloseTo(before.width + 70, 0);
+
+  const profile = grid(page, "取引先の基本情報");
+  const profileHandle = profile.getByRole("separator").first();
+  await profileHandle.focus();
+  await profileHandle.press("ArrowRight");
+  await expect(profileHandle).toHaveAttribute("aria-valuenow", "88");
+
+  await page
+    .locator(".detail-tabs")
+    .getByRole("button", { name: /^契約（/ })
+    .click();
+  const projects = grid(page, "契約一覧");
+  const headers = await projects.getByRole("columnheader").allTextContents();
+  const start = headers.indexOf("契約名");
+  expect(headers.slice(start)).toEqual([
+    "契約名",
+    "参画エンジニア",
+    "単価",
+    "開始日",
+    "概要",
+  ]);
+  const date = projects.getByRole("columnheader", {
+    name: "開始日",
+    exact: true,
+  });
+  await expect(date).toHaveAttribute("aria-sort", "descending");
+  const projectHandle = projects.getByRole("separator", {
+    name: "契約名列の幅",
+  });
+  await projectHandle.focus();
+  await projectHandle.press("ArrowRight");
+  await expect(projectHandle).toHaveAttribute("aria-valuenow", "200");
+  await expect(date).toHaveAttribute("aria-sort", "descending");
+});
 test("activities link multiple engineers and persist additions and removals", async ({
   page,
 }) => {

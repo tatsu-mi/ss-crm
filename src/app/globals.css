@@ -953,31 +953,6 @@ input[type="checkbox"] {
 .deleted-row {
   opacity: 0.6;
 }
-.probability {
-  position: relative;
-  padding-bottom: 5px;
-  min-width: 45px;
-  font-size: 10px;
-}
-.probability:after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 3px;
-  border-radius: 3px;
-  background: #edf1f7;
-  bottom: 0;
-}
-.probability i {
-  position: absolute;
-  left: 0;
-  height: 3px;
-  border-radius: 3px;
-  background: #7a9ee4;
-  bottom: 0;
-  z-index: 1;
-}
 .relation-cards {
   display: flex;
   flex-direction: column;

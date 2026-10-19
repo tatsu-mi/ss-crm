@@ -81,29 +81,6 @@ create table public.projects(
   sales_user_id uuid references public.app_users(id)
 );
 create index on public.projects(customer_id);
-create table public.deals(
-  id uuid primary key default gen_random_uuid(),
-  version integer not null default 1 check(version>0),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  deleted_at timestamptz,
-  customer_id uuid references public.customers(id) not null,
-  title text not null check(title is null or length(trim(title)) between 1 and 20000),
-  project_id uuid references public.projects(id),
-  relation_id uuid references public.customer_engineer_relations(id),
-  sales_user_id uuid references public.app_users(id),
-  stage text not null default 'proposing' check(stage in ('proposing','interview','negotiating','won','lost')),
-  probability numeric(18,2) check(probability>=0 and probability<=100),
-  expected_amount numeric(18,2) check(expected_amount>=0),
-  expected_order_on date,
-  planned_start_on date,
-  planned_end_on date,
-  check(planned_start_on<=planned_end_on)
-);
-create index on public.deals(customer_id);
-create index on public.deals(project_id);
-create index on public.deals(relation_id);
-create index on public.deals(sales_user_id);
 create table public.project_engineers(
   id uuid primary key default gen_random_uuid(),
   version integer not null default 1 check(version>0),
@@ -170,7 +147,6 @@ create table public.tasks(
   due_at timestamptz,
   status text not null default 'open' check(status in ('open','in_progress','completed','cancelled')),
   project_id uuid references public.projects(id),
-  deal_id uuid references public.deals(id),
   contract_period_id uuid references public.contract_periods(id),
   activity_id uuid references public.activities(id),
   automation_key text unique
@@ -178,7 +154,6 @@ create table public.tasks(
 create index on public.tasks(customer_id);
 create index on public.tasks(assignee_user_id);
 create index on public.tasks(project_id);
-create index on public.tasks(deal_id);
 create index on public.tasks(contract_period_id);
 create index on public.tasks(activity_id);
 create table public.activity_contacts(activity_id uuid references public.activities(id), contact_id uuid references public.customer_contacts(id), primary key(activity_id,contact_id));
@@ -190,7 +165,6 @@ create table public.engineers_revisions(id uuid primary key default gen_random_u
 create table public.customer_contacts_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.customer_contacts(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
 create table public.customer_engineer_relations_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.customer_engineer_relations(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
 create table public.projects_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.projects(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
-create table public.deals_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.deals(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
 create table public.project_engineers_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.project_engineers(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
 create table public.contract_periods_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.contract_periods(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
 create table public.activities_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.activities(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
@@ -209,7 +183,7 @@ begin
  if entity_table='customers' then return entity_id;
  elsif entity_table='project_engineers' then select p.customer_id into result from project_engineers e join projects p on p.id=e.project_id where e.id=entity_id;
  elsif entity_table='contract_periods' then select p.customer_id into result from contract_periods cp join project_engineers e on e.id=cp.project_engineer_id join projects p on p.id=e.project_id where cp.id=entity_id;
- elsif entity_table in ('customer_contacts','customer_engineer_relations','projects','deals','activities','tasks') then execute format('select customer_id from %I where id=$1',entity_table) into result using entity_id;
+ elsif entity_table in ('customer_contacts','customer_engineer_relations','projects','activities','tasks') then execute format('select customer_id from %I where id=$1',entity_table) into result using entity_id;
  end if;
  return result;
 end $$;
@@ -218,18 +192,16 @@ create function public.crm_validate() returns void language plpgsql set search_p
 declare spec record; bad boolean;
 begin
  for spec in select * from (values
- ('deals','project_id','projects'),('deals','relation_id','customer_engineer_relations'),
  ('activities','project_id','projects'),
- ('tasks','project_id','projects'),('tasks','deal_id','deals'),('tasks','contract_period_id','contract_periods'),('tasks','activity_id','activities')
+ ('tasks','project_id','projects'),('tasks','contract_period_id','contract_periods'),('tasks','activity_id','activities')
  ) as refs(child,col,parent) loop
   execute format('select exists(select 1 from %I a where a.%I is not null and crm_customer_of(%L,a.id) is distinct from crm_customer_of(%L,a.%I))',spec.child,spec.col,spec.child,spec.parent,spec.col) into bad;
   if bad then raise exception '別の顧客のデータは関連付けできません。'; end if;
  end loop;
  if exists(select 1 from contract_periods a join contract_periods b on a.project_engineer_id=b.project_engineer_id and a.id<b.id and a.deleted_at is null and b.deleted_at is null and a.starts_on<=b.ends_on and b.starts_on<=a.ends_on) then raise exception '同じ参画エンジニアの期間が重複しています。'; end if;
  if exists(select 1 from tasks t join contract_periods cp on cp.id=t.contract_period_id join project_engineers e on e.id=cp.project_engineer_id where t.project_id is not null and t.project_id<>e.project_id) then raise exception '契約と契約期間が一致しません。'; end if;
- if exists(select 1 from tasks t join contract_periods cp on cp.id=t.contract_period_id join project_engineers pe on pe.id=cp.project_engineer_id left join deals d on d.id=t.deal_id left join activities a on a.id=t.activity_id where (d.project_id is not null and d.project_id<>pe.project_id) or (a.project_id is not null and a.project_id<>pe.project_id)) then raise exception 'タスクの契約・商談・契約期間・活動が一致しません。'; end if;
+ if exists(select 1 from tasks t join contract_periods cp on cp.id=t.contract_period_id join project_engineers pe on pe.id=cp.project_engineer_id join activities a on a.id=t.activity_id where a.project_id is not null and a.project_id<>pe.project_id) then raise exception 'タスクの契約・契約期間・活動が一致しません。'; end if;
  if exists(select 1 from tasks t join activities a on a.id=t.activity_id where (t.project_id is not null and a.project_id is not null and t.project_id<>a.project_id)) then raise exception 'タスクと関連活動の関連先が一致しません。'; end if;
- if exists(select 1 from tasks a join deals d on d.id=a.deal_id where a.project_id is not null and d.project_id is not null and a.project_id<>d.project_id) then raise exception '関連契約と商談が一致しません。'; end if;
  if exists(select 1 from activity_relations r join activities a on a.id=r.activity_id join activities b on b.id=r.related_activity_id where a.customer_id<>b.customer_id) then raise exception '関連活動は同じ顧客の別の活動を選択してください。'; end if;
  if exists(select 1 from activity_contacts ac join activities a on a.id=ac.activity_id join customer_contacts c on c.id=ac.contact_id where a.customer_id<>c.customer_id) then raise exception '参加者の顧客が異なります。'; end if;
 end $$;
@@ -283,7 +255,7 @@ begin
   if not found then raise exception '通知が見つかりません。'; end if; return;
  end if;
  tbl=command->>'table';
- if tbl is null or tbl<>all(array['activity_templates','customers','engineers','customer_contacts','customer_engineer_relations','projects','deals','project_engineers','contract_periods','activities','tasks']) or command->>'kind' is null or command->>'kind' not in ('save','lifecycle') then raise exception '操作が不正です。'; end if;
+ if tbl is null or tbl<>all(array['activity_templates','customers','engineers','customer_contacts','customer_engineer_relations','projects','project_engineers','contract_periods','activities','tasks']) or command->>'kind' is null or command->>'kind' not in ('save','lifecycle') then raise exception '操作が不正です。'; end if;
  life=case when tbl in ('customers','engineers','customer_contacts','customer_engineer_relations') then 'archived_at' else 'deleted_at' end;
  entity_id=case when command->>'kind'='save' then (command->'row'->>'id')::uuid else (command->>'id')::uuid end;
  if entity_id is null then raise exception 'IDが不正です。'; end if;
@@ -418,12 +390,12 @@ grant execute on function public.crm_member() to authenticated;
 grant execute on function public.crm_mutate(jsonb) to authenticated;
 grant execute on function public.crm_run_reminders(timestamptz) to service_role;
 do $$ declare t text; begin
- foreach t in array array['activity_templates','customers','engineers','customer_contacts','customer_engineer_relations','projects','deals','project_engineers','contract_periods','activities','tasks','activity_kinds','activity_contacts','activity_engineers','activity_relations','app_users'] loop
+ foreach t in array array['activity_templates','customers','engineers','customer_contacts','customer_engineer_relations','projects','project_engineers','contract_periods','activities','tasks','activity_kinds','activity_contacts','activity_engineers','activity_relations','app_users'] loop
   execute format('alter table public.%I enable row level security',t);
   execute format('create policy member_read on public.%I for select to authenticated using(public.crm_member())',t);
   execute format('grant select on public.%I to authenticated',t);
  end loop;
- foreach t in array array['activity_templates','customers','engineers','customer_contacts','customer_engineer_relations','projects','deals','project_engineers','contract_periods','activities','tasks'] loop
+ foreach t in array array['activity_templates','customers','engineers','customer_contacts','customer_engineer_relations','projects','project_engineers','contract_periods','activities','tasks'] loop
   execute format('alter table public.%I enable row level security',t||'_revisions');
   execute format('create policy member_read on public.%I for select to authenticated using(public.crm_member())',t||'_revisions');
   execute format('grant select on public.%I to authenticated',t||'_revisions');

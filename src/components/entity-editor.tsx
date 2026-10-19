@@ -194,10 +194,8 @@ export function EntityEditor({
                             ) {
                               for (const link of [
                                 "project_id",
-                                "deal_id",
                                 "contract_period_id",
                                 "activity_id",
-                                "relation_id",
                               ])
                                 if (link in next) next[link] = null;
                               setContacts([]);

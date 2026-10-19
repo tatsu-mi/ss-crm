@@ -82,13 +82,6 @@ export function validateWorkspace(w: Workspace) {
             fail("別の顧客のデータは関連付けできません。");
         }
       }
-      if (
-        table === "deals" &&
-        row.planned_start_on &&
-        row.planned_end_on &&
-        row.planned_start_on > row.planned_end_on
-      )
-        fail("予定期間の開始日が終了日を超えています。");
       if (table === "contract_periods") {
         if (String(row.starts_on) > String(row.ends_on))
           fail("開始日は終了日以前にしてください。");
@@ -106,15 +99,6 @@ export function validateWorkspace(w: Workspace) {
           fail("同じ参画エンジニアの期間が重複しています。");
       }
       if (table === "tasks") {
-        const deal = w.deals.find((d) => d.id === row.deal_id);
-        if (
-          deal?.project_id &&
-          row.project_id &&
-          deal.project_id !== row.project_id
-        )
-          fail("関連契約と商談が一致しません。");
-      }
-      if (table === "tasks") {
         const p = w.contract_periods.find(
           (p) => p.id === row.contract_period_id,
         );
@@ -128,15 +112,13 @@ export function validateWorkspace(w: Workspace) {
         )
           fail("契約と契約期間が一致しません。");
         const a = w.activities.find((a) => a.id === row.activity_id);
-        const deal = w.deals.find((d) => d.id === row.deal_id);
         const projectIds = [
           row.project_id,
           assignment?.project_id,
-          deal?.project_id,
           a?.project_id,
         ].filter(Boolean);
         if (new Set(projectIds).size > 1)
-          fail("タスクの契約・商談・契約期間・活動が一致しません。");
+          fail("タスクの契約・契約期間・活動が一致しません。");
         if (
           a &&
           row.project_id &&

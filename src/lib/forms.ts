@@ -49,10 +49,6 @@ const date = (key: string, label: string, required = false): Input => ({
 });
 const customer = () => ref("customer_id", "顧客", "customers", true);
 const sales = () => ref("sales_user_id", "営業", "users");
-const links = (): Input[] => [
-  ref("project_id", "関連契約", "projects"),
-  ref("deal_id", "関連商談", "deals"),
-];
 export const forms: Record<
   Table,
   { label: string; lifecycle: "archived_at" | "deleted_at"; fields: Input[] }
@@ -130,35 +126,6 @@ export const forms: Record<
       sales(),
     ],
   },
-  deals: {
-    label: "商談",
-    lifecycle: "deleted_at",
-    fields: [
-      customer(),
-      text("title", "商談名", true),
-      ref("project_id", "契約", "projects"),
-      ref("relation_id", "候補の参画関係", "customer_engineer_relations"),
-      sales(),
-      select("stage", "進捗段階", [
-        ["proposing", "提案中"],
-        ["interview", "面談中"],
-        ["negotiating", "条件調整"],
-        ["won", "受注"],
-        ["lost", "失注"],
-      ]),
-      {
-        key: "probability",
-        label: "受注確度",
-        type: "money",
-        min: 0,
-        max: 100,
-      },
-      money("expected_amount", "見込金額"),
-      date("expected_order_on", "受注予定日"),
-      date("planned_start_on", "参画予定開始日"),
-      date("planned_end_on", "参画予定終了日"),
-    ],
-  },
   project_engineers: {
     label: "参画エンジニア",
     lifecycle: "deleted_at",
@@ -217,7 +184,7 @@ export const forms: Record<
         ["completed", "完了"],
         ["cancelled", "取消"],
       ]),
-      ...links(),
+      ref("project_id", "関連契約", "projects"),
       ref("contract_period_id", "関連契約期間", "contract_periods"),
       ref("activity_id", "関連活動", "activities"),
     ],
@@ -276,7 +243,7 @@ export function display(
   if (field.options)
     return field.options.find((x) => x[0] === value)?.[1] || String(value);
   if (field.type === "checkbox") return value ? "はい" : "いいえ";
-  if (field.type === "money" && field.key !== "probability") {
+  if (field.type === "money") {
     const [whole, fraction] = String(value).split(".");
     const decimals = fraction?.replace(/0+$/, "");
     return `¥${BigInt(whole).toLocaleString("ja-JP")}${decimals ? `.${decimals}` : ""}`;

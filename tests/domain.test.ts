@@ -40,6 +40,41 @@ test("standard rows and participants use direct foreign keys", () => {
   assert.ok(!("records" in w));
   assert.ok(!("skills" in w.engineers[0]));
 });
+test("tasks link negotiation activities and reject removed deal fields and mismatched contracts", () => {
+  let w = demoWorkspace();
+  const activity = w.activities.find(
+    (a) =>
+      a.activity_kind_id ===
+      w.activity_kinds.find((k) => k.name === "商談")!.id,
+  )!;
+  w = save(w, "activities", { ...activity, project_id: w.projects[0].id });
+  const task = newRow("tasks", {
+    customer_id: activity.customer_id,
+    title: "商談の次回対応",
+    activity_id: activity.id,
+    contract_period_id: w.contract_periods[0].id,
+  });
+  assert.ok(!("deal_id" in task));
+  assert.throws(
+    () => save(w, "tasks", { ...task, deal_id: newId() }),
+    /未定義/,
+  );
+  w = save(w, "tasks", task);
+  assert.equal(w.tasks.find((t) => t.id === task.id)?.activity_id, activity.id);
+  const project = newRow("projects", {
+    customer_id: activity.customer_id,
+    name: "別の契約",
+  });
+  w = save(w, "projects", project);
+  assert.throws(
+    () =>
+      save(w, "activities", {
+        ...w.activities.find((a) => a.id === activity.id)!,
+        project_id: project.id,
+      }),
+    /タスクの契約・契約期間・活動/,
+  );
+});
 test("customer edits, versions, history and lifecycle", () => {
   let w = demoWorkspace();
   const c = w.customers[0];
@@ -122,20 +157,8 @@ test("contract renewal preserves conditions and rejects overlap including restor
 test("cross-customer links and parent edits cannot invalidate existing relations", () => {
   const w = demoWorkspace();
   assert.throws(
-    () => save(w, "deals", { ...w.deals[0], customer_id: w.customers[1].id }),
-    /別の顧客/,
-  );
-  assert.throws(
     () =>
       save(w, "projects", { ...w.projects[0], customer_id: w.customers[1].id }),
-    /別の顧客/,
-  );
-  assert.throws(
-    () =>
-      save(w, "customer_engineer_relations", {
-        ...w.customer_engineer_relations[0],
-        customer_id: w.customers[1].id,
-      }),
     /別の顧客/,
   );
   assert.throws(
@@ -145,10 +168,6 @@ test("cross-customer links and parent edits cannot invalidate existing relations
         customer_id: w.customers[1].id,
       }),
     /参加者/,
-  );
-  assert.equal(
-    save(w, "deals", { ...w.deals[0], stage: "lost" }).deals[0].stage,
-    "lost",
   );
 });
 test("activity supports several participants with atomic history", () => {
@@ -207,10 +226,6 @@ test("unknown input, invalid dates, numeric limits and missing members rejected"
   );
   assert.throws(
     () => save(w, "contract_periods", { ...w.contract_periods[0], cost: "-1" }),
-    /数値/,
-  );
-  assert.throws(
-    () => save(w, "deals", { ...w.deals[0], probability: "101" }),
     /数値/,
   );
   assert.throws(
@@ -516,7 +531,7 @@ test("activities link several activities atomically and preserve labels and Mark
   const a = w.activities[0];
   assert.ok(!("deal_id" in a));
   assert.throws(
-    () => save(w, "activities", { ...a, deal_id: w.deals[0].id }),
+    () => save(w, "activities", { ...a, deal_id: newId() }),
     /未定義/,
   );
   const targets = w.activities

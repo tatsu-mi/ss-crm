@@ -37,21 +37,9 @@ const columns: Record<Table, [string, string?, number?][]> = {
   ],
   projects: [
     ["name", "契約名", 190],
-    ["description", "概要", 200],
     ["budget", "単価", 110],
-    ["planned_start_on", "参画開始日", 120],
-  ],
-  deals: [
-    ["title", "商談名", 190],
-    ["project_id", "契約", 160],
-    ["relation_id", "候補エンジニア", 170],
-    ["sales_user_id", "営業", 100],
-    ["stage", "進捗段階", 100],
-    ["probability", "受注確度", 90],
-    ["expected_amount", "見込金額", 110],
-    ["expected_order_on", "受注予定日", 120],
-    ["planned_start_on", "参画予定開始日", 120],
-    ["planned_end_on", "参画予定終了日", 120],
+    ["planned_start_on", "開始日", 120],
+    ["description", "概要", 200],
   ],
   project_engineers: [
     ["project_id", "契約", 190],
@@ -109,7 +97,7 @@ export function BusinessTable({
     standardColumn(w, table, key, saveCell, title, width),
   );
   if (table === "activities" || table === "projects") {
-    cols.splice(4, 0, {
+    cols.splice(table === "projects" ? 1 : 4, 0, {
       key: "engineers",
       label: table === "projects" ? "参画エンジニア" : "関連エンジニア",
       width: 170,
@@ -293,9 +281,15 @@ export function BusinessTable({
         />
       )}
       <Spreadsheet
+        key={table}
+        defaultSort={
+          table === "projects"
+            ? { key: "planned_start_on", direction: -1 }
+            : undefined
+        }
         label={
           label ||
-          `${{ activity_templates: "活動テンプレート", customer_contacts: "担当者", activities: "活動", projects: "契約", deals: "商談", tasks: "タスク", contract_periods: "契約期間", engineers: "エンジニア", customers: "取引先", project_engineers: "参画エンジニア", customer_engineer_relations: "参画関係" }[table]}一覧`
+          `${{ activity_templates: "活動テンプレート", customer_contacts: "担当者", activities: "活動", projects: "契約", tasks: "タスク", contract_periods: "契約期間", engineers: "エンジニア", customers: "取引先", project_engineers: "参画エンジニア", customer_engineer_relations: "参画関係" }[table]}一覧`
         }
         rows={data}
         columns={cols}

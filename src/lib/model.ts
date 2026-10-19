@@ -51,20 +51,6 @@ export interface Project extends Base {
   sales_user_id: string | null;
   deleted_at: string | null;
 }
-export interface Deal extends Base {
-  customer_id: string;
-  project_id: string | null;
-  relation_id: string | null;
-  sales_user_id: string | null;
-  title: string;
-  stage: string;
-  probability: string | null;
-  expected_amount: string | null;
-  expected_order_on: string | null;
-  planned_start_on: string | null;
-  planned_end_on: string | null;
-  deleted_at: string | null;
-}
 export interface ProjectEngineer extends Base {
   project_id: string;
   engineer_id: string;
@@ -94,7 +80,6 @@ export interface Task extends Base {
   customer_id: string;
   assignee_user_id: string | null;
   project_id: string | null;
-  deal_id: string | null;
   contract_period_id: string | null;
   activity_id: string | null;
   title: string;
@@ -116,7 +101,6 @@ export interface Tables {
   customer_contacts: Contact;
   customer_engineer_relations: Relation;
   projects: Project;
-  deals: Deal;
   project_engineers: ProjectEngineer;
   contract_periods: ContractPeriod;
   activities: Activity;
@@ -200,7 +184,6 @@ export const tableNames: Table[] = [
   "customer_contacts",
   "customer_engineer_relations",
   "projects",
-  "deals",
   "project_engineers",
   "contract_periods",
   "activities",
@@ -214,7 +197,6 @@ export function emptyWorkspace(): Workspace {
     customer_contacts: [],
     customer_engineer_relations: [],
     projects: [],
-    deals: [],
     project_engineers: [],
     contract_periods: [],
     activities: [],

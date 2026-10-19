@@ -71,7 +71,6 @@ type Axis =
   | "engineers"
   | "customer_contacts"
   | "projects"
-  | "deals"
   | "activities"
   | "tasks"
   | "notifications";
@@ -156,7 +155,6 @@ function WorkspaceView({
       const key = (
         {
           projects: "project_id",
-          deals: "deal_id",
           activities: "activity_id",
         } as Partial<Record<Table, string>>
       )[related.table];
@@ -195,7 +193,6 @@ function WorkspaceView({
     const key = (
       {
         projects: "project_id",
-        deals: "deal_id",
         activities: "activity_id",
       } as Partial<Record<Table, string>>
     )[related.table];
@@ -381,7 +378,6 @@ function WorkspaceView({
       engineers: "エンジニア",
       customer_contacts: "担当者",
       projects: "契約",
-      deals: "商談",
       activities: "活動",
       tasks: "自分のタスク",
       notifications: "通知",

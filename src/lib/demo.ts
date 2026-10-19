@@ -100,7 +100,7 @@ export function demoWorkspace(): Workspace {
     phone: "03-1234-5679",
     is_primary: true,
   });
-  const relation = add("customer_engineer_relations", {
+  add("customer_engineer_relations", {
     customer_id: c.id,
     engineer_id: e.id,
     label: "基幹システム刷新への提案・参画",
@@ -112,18 +112,6 @@ export function demoWorkspace(): Workspace {
     description: "販売管理システムの刷新",
     budget: "800000",
     planned_start_on: addDays(day, -30),
-  });
-  add("deals", {
-    customer_id: c.id,
-    project_id: project.id,
-    relation_id: relation.id,
-    sales_user_id: w.users[0].id,
-    title: "山田さん 基幹システム刷新提案",
-    stage: "won",
-    probability: "100",
-    expected_amount: "2400000",
-    planned_start_on: addDays(day, -30),
-    planned_end_on: addDays(day, 20),
   });
   const assignment = add("project_engineers", {
     project_id: project.id,
