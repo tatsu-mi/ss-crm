@@ -1,0 +1,118 @@
+# NEXUS SES CRM
+
+顧客・エンジニア・案件・商談・契約・活動・タスクを同じワークスペースで管理するSES向けCRM。Next.js App Router、React、TypeScript、Supabaseで構成し、Vercelでの実行を想定しています。
+
+業務データは専用テーブルと外部キーで管理します。契約条件は契約期間ごとに保持し、通常の列や関連テーブルの追加で今後の機能追加に対応します。
+
+## ローカルで起動
+
+Node.js 22以上を使用します。
+
+```bash
+npm ci
+cp .env.example .env.local
+npm run dev
+```
+
+http://localhost:3000 を開きます。Supabaseの公開接続情報が両方とも未設定ならデモモードで起動します。デモの変更はブラウザのLocal Storage（`nexus-crm-demo-v2`）に保存されます。このキーを削除すると初期状態に戻ります。
+
+デモモードではチーム共有や画面を閉じている間の通知処理は行いません。Supabase接続後はDBのデータを表示し、デモデータを自動送信しません。
+
+## Supabaseの準備
+
+今回のスキーマは新規導入用です。旧共通記録モデルからのデータ移行・互換機能はありません。空のSupabaseプロジェクトを用意してください。
+
+1. SQL Editorで[初期マイグレーション](supabase/migrations/202610190001_crm.sql)、[モック項目・一括保存のマイグレーション](supabase/migrations/202610190002_mock_fields.sql)を順に実行します。初期マイグレーションを適用済みのDBには後者だけを適用します。
+2. [標準活動種別](supabase/seed.sql)を実行します。業務サンプルデータは入りません。
+3. AuthenticationのUsersからアカウントを作り、SQL Editorで利用者を登録します。
+
+```sql
+insert into public.app_users(id, display_name, role)
+select id, '佐藤 花子', 'admin'
+from auth.users
+where email = 'you@company.jp';
+```
+
+メールアドレス・表示名は実際の値に置き換えてください。`role`は`admin`または`member`で、現在は両方とも標準の業務操作ができます。利用者の追加・停止・パスワード再設定はSupabase管理画面とSQL Editorで行います。`app_users`未登録、または`disabled_at`を設定したアカウントはCRMを利用できません。
+
+1つのSupabaseプロジェクトを1つの共有ワークスペースとして扱います。登録されたメンバーは原価を含む業務データを共有し、通知は本人宛だけを参照できます。RLSで読み取りを制御し、書き込みは検証と履歴保存を行う専用RPCに限定します。
+
+`.env.local`に次を設定して再起動します。
+
+```dotenv
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_PUBLISHABLE_OR_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
+CRON_SECRET=YOUR_RANDOM_SECRET
+```
+
+サービスロールキーはサーバーの通知処理だけに使います。`NEXT_PUBLIC_`を付けず、Gitに保存しないでください。
+
+## 操作
+
+画面は[モック](docs/mock.png)に合わせ、上部に取引先一覧、下部左に基本情報・担当者、右に表形式の活動を配置します。取引先一覧にはWebサイト・電話番号・業種・所在地・担当者数・契約エンジニア数・進捗状況・最終活動日・更新日・担当者を表示します。
+
+- 値のセルをダブルクリック、Enter、F2、または文字入力で直接編集できます。Enter・Tab・セル外へのフォーカス移動で保存し、Escで取り消します。選択中のセルは矢印キーで移動できます。
+- 入力エラーや同時編集の競合時は、保存せず入力内容を残します。人数・更新日などの集計項目は読み取り専用です。
+- 基本情報にはふりがな・従業員数・設立年月・売上規模も表示します。担当者・案件・商談・活動・タスクの各表でもセルを直接編集できます。
+- 「契約エンジニア」はエンジニア・契約・契約期間を結合した表です。請求単価・原価・日付は契約期間へ、担当者は契約へ保存します。「更新」は次の期間を追加し、以前の条件を残します。
+- 「契約エンジニアを追加」では、エンジニア・参画関係・契約・初回期間を一括保存します。途中で入力検証に失敗した場合は一件も作成しません。
+- 新規登録、参加者などの複数項目の編集、変更履歴、削除・保管・復元は、行のメニューから詳細画面で操作できます。
+- 活動の種別タブと関連リンクで履歴を絞り込めます。取引先一覧の検索・絞り込みと選択を保ったまま更新できます。
+
+## 配置と通知
+
+Vercelにインポートし、Framework PresetをNext.js、Node.jsを22以上に設定します。上記4つの環境変数を配置先へ設定してください。公開環境ではSupabaseの公開接続情報を両方設定します。
+
+`vercel.json`は毎日00:00 UTC（日本時間09:00）に`/api/cron/reminders`を呼び出します。`CRON_SECRET`のBearer認証とサービスロールでDBの通知関数を実行します。一般利用者には通知関数の実行権限を付与していません。
+
+通知はアプリ内通知です。契約終了30日前から営業担当への更新通知と確認タスクを作成し、タスクの期限7日前から前日までの通知、および当日の通知を生成します。期間・状態・担当者の最新値を使い、同じ通知機会での再実行やタスク作成は重複しません。営業担当のない契約期間はスキップ理由を処理結果に返します。通常画面は1分ごとに最新データを取得します。
+
+## 検証
+
+```bash
+npm run typecheck
+npm test
+npm run test:db
+npm run build
+```
+
+DBテストはPGliteの一時PostgreSQL環境で新規スキーマ、外部キー、顧客整合性、契約期間の重複、同時編集検出、履歴、削除復元、参加者の一括保存、RLS、RPC権限、通知の再実行を確認します。外部のSupabase接続は不要です。
+
+ブラウザテストはデモモードで実行します。
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+```
+
+必要なら`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`でブラウザを指定できます。
+
+## 構成
+
+| 場所                           | 内容                                   |
+| ------------------------------ | -------------------------------------- |
+| `src/lib/model.ts`             | 専用テーブルごとのデータ型と参照処理   |
+| `src/lib/forms.ts`             | 固定の標準入力項目、表示、初期値       |
+| `src/lib/domain.ts`            | 業務上の入力検証、デモの保存と通知処理 |
+| `src/lib/server-store.ts`      | 認証とDBからの読み取り                 |
+| `src/components`               | 顧客ワークスペースと標準項目の編集画面 |
+| `src/app/api`                  | 認証付きAPI、定期通知API               |
+| `supabase/migrations`          | 専用テーブル、履歴、RLS、保存と通知RPC |
+| `supabase/seed.sql`            | 固定の活動種別                         |
+| `tests` / `scripts/test-db.ts` | 業務・ブラウザ・DBの検証               |
+
+[ER図](docs/er-diagram.md)と[ユーザーストーリー](docs/user-stories.md)を参照してください。
+
+## ADR一覧
+
+既存ADRは旧実装での判断を記録したものです。特に共通記録・動的項目・意味による自動処理の判断は、現在の専用テーブル構造と異なります。追加・追記はユーザーの明示的な指示がある場合のみ行い、[記録方針](AGENTS.md#adrの記録方針)に従います。
+
+- [ADR 001 顧客・エンジニア・参画関係を固定の中心とする](docs/adr/adr-001-customer-engineer-core.md)
+- [ADR 002 周辺情報を定義付きの共通記録で管理する](docs/adr/adr-002-extensible-records.md)
+- [ADR 003 単純値をJSONに参照を関連テーブルに保存する](docs/adr/adr-003-json-values-relational-references.md)
+- [ADR 004 自動処理を項目と選択肢の意味に結び付ける](docs/adr/adr-004-semantic-automation.md)
+- [ADR 005 記録の論理削除と定義の利用停止で過去の情報を守る](docs/adr/adr-005-record-definition-lifecycle.md)
+- [ADR 006 利用者権限とRLSおよび専用RPCでDBアクセスを制御する](docs/adr/adr-006-database-access-boundary.md)
+- [ADR 007 DBトランザクションと競合制御で保存時の整合性を保証する](docs/adr/adr-007-transactional-integrity.md)
+- [ADR 008 最新状態から冪等なアプリ内通知を生成する](docs/adr/adr-008-current-state-idempotent-notifications.md)
