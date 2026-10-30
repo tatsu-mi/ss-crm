@@ -4,6 +4,8 @@ import { browserClient, configured, invalidConfiguration } from "./supabase";
 import { demoWorkspace } from "./demo";
 import { applyCommand, runReminders } from "./domain";
 import type { Workspace, Command } from "./model";
+import { importDemoCompany, type DemoWorkspace } from "./sansan-demo";
+import type { SansanCompany } from "./sansan";
 const STORAGE = "nexus-crm-demo-v6";
 export function useWorkspace() {
   const [w, setW] = useState<Workspace | null>(null),
@@ -101,5 +103,26 @@ export function useWorkspace() {
     if (token) void fetchData(token);
     else window.location.reload();
   }, [token, fetchData]);
-  return { w, userId, loading, error, save, reload };
+  const importDemo = useCallback(
+    async (
+      company: SansanCompany,
+      customerId: string | null,
+      contacts: { personId: string; contactId: string | null }[],
+    ) => {
+      if (configured || !w) throw new Error("デモモードを利用できません。");
+      const raw = localStorage.getItem(STORAGE);
+      const base = raw ? (JSON.parse(raw) as DemoWorkspace) : w;
+      const next = importDemoCompany(
+        base,
+        userId,
+        company,
+        customerId,
+        contacts,
+      );
+      localStorage.setItem(STORAGE, JSON.stringify(next));
+      setW(next);
+    },
+    [w, userId],
+  );
+  return { w, userId, loading, error, save, reload, importDemo };
 }

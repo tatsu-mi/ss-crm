@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     const command = JSON.parse(raw) as Command;
     if (
       !command ||
-      !["save", "lifecycle", "read_notification", "batch"].includes(
+      !["save", "lifecycle", "purge", "read_notification", "batch"].includes(
         command.kind,
       )
     )

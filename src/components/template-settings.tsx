@@ -1,8 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Plus } from "lucide-react";
-import type { ActivityTemplate, Base, Command, Workspace } from "@/lib/model";
-import { inactive } from "@/lib/model";
+import type { Base, Command, Workspace } from "@/lib/model";
 import { newRow } from "@/lib/forms";
 import { Dialog } from "./dialog";
 import { ActivityContentEditor } from "./activity-content";
@@ -17,7 +16,6 @@ export function TemplateSettings({
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState<Base | null>(null);
-  const [showDeleted, setShowDeleted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   function select(row: Base) {
@@ -36,18 +34,9 @@ export function TemplateSettings({
       setBusy(false);
     }
   }
-  function lifecycle(row: ActivityTemplate) {
-    void submit({
-      kind: "lifecycle",
-      table: "activity_templates",
-      id: row.id,
-      expected_version: row.version,
-      restore: inactive(row),
-    });
-  }
-  const templates = w.activity_templates
-    .filter((t) => showDeleted || !inactive(t))
-    .toSorted((a, b) => a.name.localeCompare(b.name, "ja"));
+  const templates = w.activity_templates.toSorted((a, b) =>
+    a.name.localeCompare(b.name, "ja"),
+  );
   return (
     <Dialog
       title="設定：活動テンプレート"
@@ -73,15 +62,6 @@ export function TemplateSettings({
             <Plus size={15} />
             テンプレートを追加
           </button>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={showDeleted}
-              disabled={busy}
-              onChange={(e) => setShowDeleted(e.target.checked)}
-            />
-            削除済みを表示
-          </label>
         </div>
         <ul
           className="template-settings-list"
@@ -93,23 +73,32 @@ export function TemplateSettings({
                 type="button"
                 className="text-button"
                 aria-pressed={draft?.id === t.id}
-                disabled={busy || inactive(t)}
+                disabled={busy}
                 onClick={() => select(t)}
               >
                 {t.name}
-                {inactive(t) ? "（削除済み）" : ""}
               </button>
-              <div>
-                <button
-                  type="button"
-                  className="text-button"
-                  disabled={busy}
-                  aria-label={`${t.name}を${inactive(t) ? "復元" : "削除"}`}
-                  onClick={() => lifecycle(t)}
-                >
-                  {inactive(t) ? "復元" : "削除"}
-                </button>
-              </div>
+              <button
+                type="button"
+                className="text-button danger"
+                disabled={busy}
+                aria-label={`${t.name}を削除`}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "テンプレートとその変更履歴を削除します。復元できません。入力済みの活動内容は残ります。削除しますか？",
+                    )
+                  )
+                    void submit({
+                      kind: "purge",
+                      table: "activity_templates",
+                      id: t.id,
+                      expected_version: t.version,
+                    });
+                }}
+              >
+                削除
+              </button>
             </li>
           ))}
           {!templates.length && (

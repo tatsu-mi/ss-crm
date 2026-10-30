@@ -203,7 +203,7 @@ export function applyCommand(
     return w;
   }
   if (
-    !["save", "lifecycle"].includes(command.kind) ||
+    !["save", "lifecycle", "purge"].includes(command.kind) ||
     !tableNames.includes(command.table)
   )
     fail("操作が不正です。");
@@ -217,6 +217,88 @@ export function applyCommand(
     (!existing && command.kind !== "save")
   )
     fail("他の利用者が変更しました。再読み込みしてください。");
+  if (command.kind === "purge") {
+    if (!existing || (table !== "activity_templates" && !inactive(existing)))
+      fail("削除済みのデータのみ完全に削除できます。");
+    const removed = Object.fromEntries(
+      tableNames.map((t) => [t, new Set<string>()]),
+    ) as Record<Table, Set<string>>;
+    removed[table].add(id);
+    const edges: [Table, string, Table][] = [
+      ["customer_contacts", "customer_id", "customers"],
+      ["customer_engineer_relations", "customer_id", "customers"],
+      ["customer_engineer_relations", "engineer_id", "engineers"],
+      ["projects", "customer_id", "customers"],
+      ["project_engineers", "project_id", "projects"],
+      ["project_engineers", "engineer_id", "engineers"],
+      ["contract_periods", "project_engineer_id", "project_engineers"],
+      ["activities", "customer_id", "customers"],
+      ["activities", "project_id", "projects"],
+      ["tasks", "customer_id", "customers"],
+      ["tasks", "project_id", "projects"],
+      ["tasks", "contract_period_id", "contract_periods"],
+      ["tasks", "activity_id", "activities"],
+    ];
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [child, key, parent] of edges)
+        for (const item of w[child])
+          if (
+            removed[parent].has(String(item[key])) &&
+            !removed[child].has(item.id)
+          ) {
+            removed[child].add(item.id);
+            changed = true;
+          }
+    }
+    for (const name of tableNames)
+      (w[name] as Base[]) = w[name].filter(
+        (item) => !removed[name].has(item.id),
+      );
+    const removedIds = tableNames.flatMap((t) => [...removed[t]]);
+    const removedIdSet = new Set(removedIds);
+    w.revisions = w.revisions.filter(
+      (r) =>
+        !removedIdSet.has(r.entity_id) &&
+        !removedIds.some((id) => JSON.stringify(r.snapshot).includes(id)),
+    );
+    w.activity_contacts = w.activity_contacts.filter(
+      (l) =>
+        !removed.activities.has(l.activity_id) &&
+        !removed.customer_contacts.has(l.contact_id),
+    );
+    w.activity_engineers = w.activity_engineers.filter(
+      (l) =>
+        !removed.activities.has(l.activity_id) &&
+        !removed.engineers.has(l.engineer_id),
+    );
+    w.activity_relations = w.activity_relations.filter(
+      (l) =>
+        !removed.activities.has(l.activity_id) &&
+        !removed.activities.has(l.related_activity_id),
+    );
+    w.notifications = w.notifications.filter(
+      (n) =>
+        !removed.tasks.has(n.task_id || "") &&
+        !removed.contract_periods.has(n.contract_period_id || ""),
+    );
+    const demo = w as Workspace & {
+      demo_sansan?: {
+        companies: Record<string, string>;
+        people: Record<string, string>;
+      };
+    };
+    if (demo.demo_sansan) {
+      for (const [key, value] of Object.entries(demo.demo_sansan.companies))
+        if (removed.customers.has(value))
+          delete demo.demo_sansan.companies[key];
+      for (const [key, value] of Object.entries(demo.demo_sansan.people))
+        if (removed.customer_contacts.has(value))
+          delete demo.demo_sansan.people[key];
+    }
+    return w;
+  }
   let row: Base;
   if (command.kind === "save") {
     const allowed = new Set([
@@ -224,7 +306,7 @@ export function applyCommand(
       "version",
       "created_at",
       "updated_at",
-      forms[table].lifecycle,
+      ...(forms[table].lifecycle ? [forms[table].lifecycle] : []),
       ...forms[table].fields.map((f) => f.key),
       ...(table === "tasks" ? ["automation_key"] : []),
     ]);
@@ -262,7 +344,8 @@ export function applyCommand(
           fail(`${f.label}は利用できません。`);
       }
     }
-    row[forms[table].lifecycle] = existing?.[forms[table].lifecycle] || null;
+    const lifecycle = forms[table].lifecycle;
+    if (lifecycle) row[lifecycle] = existing?.[lifecycle] || null;
     if (existing && inactive(existing)) fail("復元してから編集してください。");
     if (table === "tasks")
       row.automation_key = existing?.automation_key || null;
@@ -332,11 +415,11 @@ export function applyCommand(
           engineers.map((engineer_id) => ({ activity_id: id, engineer_id })),
         );
     }
-  } else
-    row = {
-      ...existing!,
-      [forms[table].lifecycle]: command.restore ? null : now,
-    };
+  } else {
+    const lifecycle = forms[table].lifecycle;
+    if (!lifecycle) return fail("操作が不正です。");
+    row = { ...existing!, [lifecycle]: command.restore ? null : now };
+  }
   row.version = (existing?.version || 0) + 1;
   row.created_at = existing?.created_at || now;
   row.updated_at = now;

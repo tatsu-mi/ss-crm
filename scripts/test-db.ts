@@ -128,29 +128,37 @@ async function main() {
     ).rows[0].snapshot.row.body,
     template.body,
   );
+  await assert.rejects(
+    mutate({
+      kind: "purge",
+      table: "activity_templates",
+      id: template.id,
+      expected_version: 1,
+    }),
+    /他の利用者/,
+  );
   await mutate({
-    kind: "lifecycle",
+    kind: "purge",
     table: "activity_templates",
     id: template.id,
     expected_version: 2,
-    restore: false,
-  });
-  await assert.rejects(save("activity_templates", template, 3), /復元/);
-  await mutate({
-    kind: "lifecycle",
-    table: "activity_templates",
-    id: template.id,
-    expected_version: 3,
-    restore: true,
   });
   assert.equal(
     (
-      await db.query<{ deleted_at: string | null }>(
-        "select deleted_at from activity_templates where id=$1",
+      await db.query("select * from activity_templates where id=$1", [
+        template.id,
+      ])
+    ).rows.length,
+    0,
+  );
+  assert.equal(
+    (
+      await db.query(
+        "select * from activity_templates_revisions where entity_id=$1",
         [template.id],
       )
-    ).rows[0].deleted_at,
-    null,
+    ).rows.length,
+    0,
   );
   await assert.rejects(
     db.query("update activity_templates set body='直接変更' where id=$1", [
@@ -784,6 +792,131 @@ async function main() {
     save("activities", { ...negotiation, project_id: otherProject.id }, 1),
     /タスクの契約・契約期間・活動/,
   );
+  const sansanPayload = {
+    company_id: "sansan-company-test",
+    name: "連携テスト会社",
+    contacts: [
+      {
+        person_id: "sansan-person-test",
+        card_id: "sansan-card-test",
+        name: "連携 太郎",
+      },
+    ],
+  };
+  const imported = await db.query<{ crm_import_sansan: string }>(
+    "select public.crm_import_sansan($1::jsonb)",
+    [JSON.stringify(sansanPayload)],
+  );
+  const importedId = imported.rows[0].crm_import_sansan;
+  assert.equal(
+    (
+      await db.query("select * from customer_contacts where customer_id=$1", [
+        importedId,
+      ])
+    ).rows.length,
+    1,
+  );
+  assert.equal(
+    (
+      await db.query("select * from customers_revisions where entity_id=$1", [
+        importedId,
+      ])
+    ).rows.length,
+    1,
+  );
+  await assert.rejects(
+    db.query("select public.crm_import_sansan($1::jsonb)", [
+      JSON.stringify(sansanPayload),
+    ]),
+    /取り込み済み/,
+  );
+  await assert.rejects(
+    db.query("select public.crm_import_sansan($1::jsonb)", [
+      JSON.stringify({ ...sansanPayload, company_id: "sansan-other" }),
+    ]),
+    /連携済み/,
+  );
+  assert.equal(
+    (
+      await db.query(
+        "select * from sansan_companies where company_id='sansan-other'",
+      )
+    ).rows.length,
+    0,
+  );
+  await assert.rejects(
+    db.query("insert into sansan_companies values ('x',$1)", [importedId]),
+    /permission denied/,
+  );
+  const dependentProject = newRow("projects", {
+    customer_id: importedId,
+    name: "削除対象の契約",
+  });
+  await save("projects", dependentProject);
+  const importedPurge: Command = {
+    kind: "purge",
+    table: "customers",
+    id: importedId,
+    expected_version: 1,
+  };
+  await assert.rejects(mutate(importedPurge), /削除済み/);
+  await mutate({
+    kind: "lifecycle",
+    table: "customers",
+    id: importedId,
+    expected_version: 1,
+    restore: false,
+  });
+  await assert.rejects(mutate(importedPurge), /他の利用者/);
+  await mutate({ ...importedPurge, expected_version: 2 });
+  for (const [table, column] of [
+    ["customers", "id"],
+    ["customer_contacts", "customer_id"],
+    ["customers_revisions", "entity_id"],
+    ["sansan_companies", "customer_id"],
+  ]) {
+    assert.equal(
+      (
+        await db.query(`select * from ${table} where ${column}=$1`, [
+          importedId,
+        ])
+      ).rows.length,
+      0,
+      table,
+    );
+  }
+  assert.equal(
+    (
+      await db.query("select * from projects where id=$1", [
+        dependentProject.id,
+      ])
+    ).rows.length,
+    0,
+  );
+  assert.equal(
+    (
+      await db.query("select * from projects_revisions where entity_id=$1", [
+        dependentProject.id,
+      ])
+    ).rows.length,
+    0,
+  );
+  assert.equal(
+    (
+      await db.query(
+        "select * from sansan_cards where card_id='sansan-card-test'",
+      )
+    ).rows.length,
+    0,
+  );
+  assert.equal(
+    (
+      await db.query(
+        "select * from sansan_people where person_id='sansan-person-test'",
+      )
+    ).rows.length,
+    0,
+  );
   await db.exec("reset role");
   await db.query("select set_config('request.jwt.claim.sub',$1,false)", [
     newId(),
@@ -796,6 +929,12 @@ async function main() {
   );
   await assert.rejects(save("activity_templates", template, 4), /利用登録/);
   await assert.rejects(save("customers", c, 2), /利用登録/);
+  await assert.rejects(
+    db.query("select public.crm_import_sansan($1::jsonb)", [
+      JSON.stringify(sansanPayload),
+    ]),
+    /利用登録/,
+  );
   await db.exec("reset role; set role anon");
   await assert.rejects(
     db.query("select public.crm_run_reminders()"),

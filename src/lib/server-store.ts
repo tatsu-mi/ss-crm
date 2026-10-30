@@ -82,7 +82,7 @@ export async function loadWorkspace(db: SupabaseClient): Promise<Workspace> {
               "version",
               "created_at",
               "updated_at",
-              spec.lifecycle,
+              ...(spec.lifecycle ? [spec.lifecycle] : []),
               ...spec.fields.map((f) =>
                 f.type === "money" ? `${f.key}::text` : f.key,
               ),

@@ -92,7 +92,6 @@ export interface Task extends Base {
 export interface ActivityTemplate extends Base {
   name: string;
   body: string;
-  deleted_at: string | null;
 }
 export interface Tables {
   activity_templates: ActivityTemplate;
@@ -176,6 +175,7 @@ export type Command =
       expected_version: number;
       restore: boolean;
     }
+  | { kind: "purge"; table: Table; id: string; expected_version: number }
   | { kind: "read_notification"; id: string };
 export const tableNames: Table[] = [
   "activity_templates",

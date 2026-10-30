@@ -6,11 +6,10 @@ create table public.activity_templates(
   version integer not null default 1 check(version>0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  deleted_at timestamptz,
   name text not null check(length(trim(name)) between 1 and 20000),
   body text not null check(length(trim(body)) between 1 and 20000)
 );
-create table public.activity_templates_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.activity_templates(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
+create table public.activity_templates_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.activity_templates(id) on delete cascade, version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
 create table public.customers(
   id uuid primary key default gen_random_uuid(),
   version integer not null default 1 check(version>0),
@@ -46,7 +45,7 @@ create table public.customer_contacts(
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   archived_at timestamptz,
-  customer_id uuid references public.customers(id) not null,
+  customer_id uuid references public.customers(id) on delete cascade not null,
   name text not null check(name is null or length(trim(name)) between 1 and 20000),
   department text check(department is null or length(trim(department)) between 1 and 20000),
   position text check(position is null or length(trim(position)) between 1 and 20000),
@@ -55,14 +54,17 @@ create table public.customer_contacts(
   is_primary boolean not null default false
 );
 create index on public.customer_contacts(customer_id);
+create table public.sansan_companies(company_id text primary key, customer_id uuid not null references public.customers(id) on delete cascade);
+create table public.sansan_people(person_id text primary key, contact_id uuid not null references public.customer_contacts(id) on delete cascade);
+create table public.sansan_cards(card_id text primary key, person_id text references public.sansan_people(person_id) on delete cascade, contact_id uuid not null references public.customer_contacts(id) on delete cascade);
 create table public.customer_engineer_relations(
   id uuid primary key default gen_random_uuid(),
   version integer not null default 1 check(version>0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   archived_at timestamptz,
-  customer_id uuid references public.customers(id) not null,
-  engineer_id uuid references public.engineers(id) not null,
+  customer_id uuid references public.customers(id) on delete cascade not null,
+  engineer_id uuid references public.engineers(id) on delete cascade not null,
   label text not null check(label is null or length(trim(label)) between 1 and 20000)
 );
 create index on public.customer_engineer_relations(customer_id);
@@ -73,7 +75,7 @@ create table public.projects(
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
-  customer_id uuid references public.customers(id) not null,
+  customer_id uuid references public.customers(id) on delete cascade not null,
   name text not null check(name is null or length(trim(name)) between 1 and 20000),
   description text check(description is null or length(trim(description)) between 1 and 20000),
   budget numeric(18,2) check(budget>=0),
@@ -87,8 +89,8 @@ create table public.project_engineers(
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
-  project_id uuid not null references public.projects(id),
-  engineer_id uuid not null references public.engineers(id)
+  project_id uuid not null references public.projects(id) on delete cascade,
+  engineer_id uuid not null references public.engineers(id) on delete cascade
 );
 create index on public.projects(sales_user_id);
 create index on public.project_engineers(engineer_id);
@@ -99,7 +101,7 @@ create table public.contract_periods(
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
-  project_engineer_id uuid references public.project_engineers(id) not null,
+  project_engineer_id uuid references public.project_engineers(id) on delete cascade not null,
   starts_on date not null,
   ends_on date not null,
   billing_rate numeric(18,2) not null check(billing_rate>=0),
@@ -115,21 +117,21 @@ create table public.activities(
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
-  customer_id uuid references public.customers(id) not null,
+  customer_id uuid references public.customers(id) on delete cascade not null,
   title text not null check(title is null or length(trim(title)) between 1 and 20000),
   activity_kind_id uuid references public.activity_kinds(id) not null,
   recorded_by uuid references public.app_users(id) not null,
   occurred_at timestamptz not null,
   body text check(body is null or length(trim(body)) between 1 and 20000),
-  project_id uuid references public.projects(id)
+  project_id uuid references public.projects(id) on delete cascade
 );
 create index on public.activities(customer_id);
 create index on public.activities(activity_kind_id);
 create index on public.activities(recorded_by);
 create index on public.activities(project_id);
 create table public.activity_relations(
-  activity_id uuid references public.activities(id),
-  related_activity_id uuid references public.activities(id),
+  activity_id uuid references public.activities(id) on delete cascade,
+  related_activity_id uuid references public.activities(id) on delete cascade,
   primary key(activity_id,related_activity_id),
   check(activity_id<>related_activity_id)
 );
@@ -140,15 +142,15 @@ create table public.tasks(
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
-  customer_id uuid references public.customers(id) not null,
+  customer_id uuid references public.customers(id) on delete cascade not null,
   title text not null check(title is null or length(trim(title)) between 1 and 20000),
   body text check(body is null or length(trim(body)) between 1 and 20000),
   assignee_user_id uuid references public.app_users(id),
   due_at timestamptz,
   status text not null default 'open' check(status in ('open','in_progress','completed','cancelled')),
-  project_id uuid references public.projects(id),
-  contract_period_id uuid references public.contract_periods(id),
-  activity_id uuid references public.activities(id),
+  project_id uuid references public.projects(id) on delete cascade,
+  contract_period_id uuid references public.contract_periods(id) on delete cascade,
+  activity_id uuid references public.activities(id) on delete cascade,
   automation_key text unique
 );
 create index on public.tasks(customer_id);
@@ -156,19 +158,19 @@ create index on public.tasks(assignee_user_id);
 create index on public.tasks(project_id);
 create index on public.tasks(contract_period_id);
 create index on public.tasks(activity_id);
-create table public.activity_contacts(activity_id uuid references public.activities(id), contact_id uuid references public.customer_contacts(id), primary key(activity_id,contact_id));
-create table public.activity_engineers(activity_id uuid references public.activities(id), engineer_id uuid references public.engineers(id), primary key(activity_id,engineer_id));
-create table public.notifications(id uuid primary key default gen_random_uuid(), task_id uuid references public.tasks(id), contract_period_id uuid references public.contract_periods(id), recipient_user_id uuid not null references public.app_users(id), rule_key text not null, scheduled_at timestamptz not null, status text not null check(status in ('pending','delivered','cancelled')), idempotency_key text not null unique, delivered_at timestamptz, read_at timestamptz, check(num_nonnulls(task_id,contract_period_id)=1));
+create table public.activity_contacts(activity_id uuid references public.activities(id) on delete cascade, contact_id uuid references public.customer_contacts(id) on delete cascade, primary key(activity_id,contact_id));
+create table public.activity_engineers(activity_id uuid references public.activities(id) on delete cascade, engineer_id uuid references public.engineers(id) on delete cascade, primary key(activity_id,engineer_id));
+create table public.notifications(id uuid primary key default gen_random_uuid(), task_id uuid references public.tasks(id) on delete cascade, contract_period_id uuid references public.contract_periods(id) on delete cascade, recipient_user_id uuid not null references public.app_users(id), rule_key text not null, scheduled_at timestamptz not null, status text not null check(status in ('pending','delivered','cancelled')), idempotency_key text not null unique, delivered_at timestamptz, read_at timestamptz, check(num_nonnulls(task_id,contract_period_id)=1));
 create index on public.notifications(recipient_user_id,scheduled_at);
-create table public.customers_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.customers(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
-create table public.engineers_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.engineers(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
-create table public.customer_contacts_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.customer_contacts(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
-create table public.customer_engineer_relations_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.customer_engineer_relations(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
-create table public.projects_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.projects(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
-create table public.project_engineers_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.project_engineers(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
-create table public.contract_periods_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.contract_periods(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
-create table public.activities_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.activities(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
-create table public.tasks_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.tasks(id), version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
+create table public.customers_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.customers(id) on delete cascade, version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
+create table public.engineers_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.engineers(id) on delete cascade, version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
+create table public.customer_contacts_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.customer_contacts(id) on delete cascade, version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
+create table public.customer_engineer_relations_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.customer_engineer_relations(id) on delete cascade, version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
+create table public.projects_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.projects(id) on delete cascade, version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
+create table public.project_engineers_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.project_engineers(id) on delete cascade, version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
+create table public.contract_periods_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.contract_periods(id) on delete cascade, version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
+create table public.activities_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.activities(id) on delete cascade, version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
+create table public.tasks_revisions(id uuid primary key default gen_random_uuid(), entity_id uuid not null references public.tasks(id) on delete cascade, version integer not null, operation text not null, snapshot jsonb not null, changed_by uuid references public.app_users(id), changed_at timestamptz not null default now(), unique(entity_id,version));
 
 
 
@@ -236,7 +238,7 @@ begin
 end $$;
 
 create function public.crm_mutate(command jsonb) returns void language plpgsql security definer set search_path=public,pg_temp as $$
-declare tbl text; entity_id uuid; current_row jsonb; incoming jsonb; old_version integer; life text; cols text; vals text; updates text; op text; field record; target jsonb; link uuid; actor uuid=auth.uid(); child_command jsonb; membership record; requested uuid[]; membership_id uuid;
+declare tbl text; entity_id uuid; current_row jsonb; incoming jsonb; old_version integer; life text; cols text; vals text; updates text; op text; field record; target jsonb; link uuid; actor uuid=auth.uid(); child_command jsonb; membership record; requested uuid[]; membership_id uuid; purge_ids uuid[]; rev_table text;
 begin
  if not crm_member() then raise exception 'CRMへの利用登録がありません。'; end if;
  perform pg_advisory_xact_lock(104219);
@@ -255,14 +257,38 @@ begin
   if not found then raise exception '通知が見つかりません。'; end if; return;
  end if;
  tbl=command->>'table';
- if tbl is null or tbl<>all(array['activity_templates','customers','engineers','customer_contacts','customer_engineer_relations','projects','project_engineers','contract_periods','activities','tasks']) or command->>'kind' is null or command->>'kind' not in ('save','lifecycle') then raise exception '操作が不正です。'; end if;
- life=case when tbl in ('customers','engineers','customer_contacts','customer_engineer_relations') then 'archived_at' else 'deleted_at' end;
+ if tbl is null or tbl<>all(array['activity_templates','customers','engineers','customer_contacts','customer_engineer_relations','projects','project_engineers','contract_periods','activities','tasks']) or command->>'kind' is null or command->>'kind' not in ('save','lifecycle','purge') then raise exception '操作が不正です。'; end if;
+ life=case when tbl='activity_templates' then null when tbl in ('customers','engineers','customer_contacts','customer_engineer_relations') then 'archived_at' else 'deleted_at' end;
  entity_id=case when command->>'kind'='save' then (command->'row'->>'id')::uuid else (command->>'id')::uuid end;
  if entity_id is null then raise exception 'IDが不正です。'; end if;
  execute format('select to_jsonb(t) from %I t where id=$1 for update',tbl) into current_row using entity_id;
  old_version=coalesce((current_row->>'version')::integer,0);
  if (command->>'expected_version')::integer is distinct from old_version then raise exception '他の利用者が変更しました。再読み込みしてください。'; end if;
+ if command->>'kind'='purge' then
+  if current_row is null or (tbl<>'activity_templates' and current_row->>life is null) then raise exception '削除済みのデータのみ完全に削除できます。'; end if;
+  -- Collect all dependent business rows before the cascading delete, including
+  -- active rows. Historical snapshots elsewhere may contain their identifiers.
+  with recursive doomed(t,id) as (
+   select tbl,entity_id
+   union
+   select child.t,child.id from doomed d cross join lateral (
+    select 'customer_contacts'::text t,id from customer_contacts where d.t='customers' and customer_id=d.id
+    union all select 'customer_engineer_relations',id from customer_engineer_relations where (d.t='customers' and customer_id=d.id) or (d.t='engineers' and engineer_id=d.id)
+    union all select 'projects',id from projects where d.t='customers' and customer_id=d.id
+    union all select 'project_engineers',id from project_engineers where (d.t='projects' and project_id=d.id) or (d.t='engineers' and engineer_id=d.id)
+    union all select 'contract_periods',id from contract_periods where d.t='project_engineers' and project_engineer_id=d.id
+    union all select 'activities',id from activities where (d.t='customers' and customer_id=d.id) or (d.t='projects' and project_id=d.id)
+    union all select 'tasks',id from tasks where (d.t='customers' and customer_id=d.id) or (d.t='projects' and project_id=d.id) or (d.t='contract_periods' and contract_period_id=d.id) or (d.t='activities' and activity_id=d.id)
+   ) child
+  ) select array_agg(id) into purge_ids from doomed;
+  foreach rev_table in array array['activity_templates','customers','engineers','customer_contacts','customer_engineer_relations','projects','project_engineers','contract_periods','activities','tasks'] loop
+   execute format('delete from %I where entity_id=any($1) or exists(select 1 from unnest($1) x where position(x::text in snapshot::text)>0)',rev_table||'_revisions') using purge_ids;
+  end loop;
+  execute format('delete from %I where id=$1',tbl) using entity_id;
+  return;
+ end if;
  if command->>'kind'='lifecycle' then
+  if life is null then raise exception '操作が不正です。'; end if;
   if current_row is null or jsonb_typeof(command->'restore') is distinct from 'boolean' then raise exception '操作が不正です。'; end if;
   execute format('update %I set %I=$1, version=version+1,updated_at=now() where id=$2',tbl,life) using case when (command->>'restore')::boolean then null else now() end,entity_id;
   op=case when (command->>'restore')::boolean then 'restore' else 'delete' end;
@@ -278,7 +304,8 @@ begin
    ((incoming->>'project_id') is distinct from (current_row->>'project_id') or (incoming->>'engineer_id') is distinct from (current_row->>'engineer_id')) then
    raise exception '参画先・エンジニアは変更できません。紐づけを解除して追加してください。';
   end if;
-  incoming=incoming || jsonb_build_object('id',entity_id,'version',old_version+1,'created_at',coalesce(current_row->'created_at',to_jsonb(now())),'updated_at',now(),life,null);
+  incoming=incoming || jsonb_build_object('id',entity_id,'version',old_version+1,'created_at',coalesce(current_row->'created_at',to_jsonb(now())),'updated_at',now());
+  if life is not null then incoming=incoming || jsonb_build_object(life,null); end if;
   if tbl='tasks' then incoming=incoming || jsonb_build_object('automation_key',current_row->'automation_key'); end if;
   -- Existing inactive references may remain, but new references must be usable.
   for field in select a.attname as col,c.confrelid::regclass as parent from pg_constraint c join pg_attribute a on a.attrelid=c.conrelid and a.attnum=c.conkey[1] where c.conrelid=('public.'||tbl)::regclass and c.contype='f' loop
@@ -340,6 +367,37 @@ begin
  perform crm_revision(tbl,entity_id,op);
 end $$;
 
+create function public.crm_import_sansan(payload jsonb) returns uuid language plpgsql security definer set search_path=public,pg_temp as $$
+declare company text; customer uuid; contact uuid; item jsonb; person text; card text; row_data jsonb;
+begin
+ if not crm_member() then raise exception 'CRMへの利用登録がありません。'; end if;
+ perform pg_advisory_xact_lock(104219);
+ company=nullif(trim(payload->>'company_id'),'');
+ if company is null or length(company)>500 or jsonb_typeof(payload->'contacts') is distinct from 'array' then raise exception '取込データが不正です。'; end if;
+ if exists(select 1 from sansan_companies where company_id=company) then raise exception 'この会社は取り込み済みです。'; end if;
+ customer=nullif(payload->>'customer_id','')::uuid;
+ if customer is null then
+  customer=gen_random_uuid();
+  row_data=jsonb_build_object('id',customer,'name',nullif(trim(payload->>'name'),''),'website',nullif(trim(payload->>'website'),''),'phone',nullif(trim(payload->>'phone'),''),'address',nullif(trim(payload->>'address'),''),'trade_status','prospect');
+  perform crm_mutate(jsonb_build_object('kind','save','table','customers','row',row_data,'expected_version',0));
+ elsif not exists(select 1 from customers where id=customer and archived_at is null) then raise exception '取引先が利用できません。'; end if;
+ insert into sansan_companies values(company,customer);
+ for item in select * from jsonb_array_elements(payload->'contacts') loop
+  person=nullif(trim(item->>'person_id'),''); card=nullif(trim(item->>'card_id'),'');
+  if person is null or card is null or length(person)>500 or length(card)>500 then raise exception '担当者の識別子が不正です。'; end if;
+  if exists(select 1 from sansan_people where person_id=person) or exists(select 1 from sansan_cards where card_id=card) then raise exception '担当者は別の会社に連携済みです。確認してください。'; end if;
+  contact=nullif(item->>'contact_id','')::uuid;
+  if contact is null then
+   contact=gen_random_uuid();
+   row_data=jsonb_build_object('id',contact,'customer_id',customer,'name',nullif(trim(item->>'name'),''),'department',nullif(trim(item->>'department'),''),'position',nullif(trim(item->>'position'),''),'email',nullif(trim(item->>'email'),''),'phone',nullif(trim(item->>'phone'),''),'is_primary',false);
+   perform crm_mutate(jsonb_build_object('kind','save','table','customer_contacts','row',row_data,'expected_version',0));
+  elsif not exists(select 1 from customer_contacts where id=contact and customer_id=customer and archived_at is null) then raise exception '担当者が利用できません。'; end if;
+  insert into sansan_people values(person,contact);
+  insert into sansan_cards values(card,person,contact);
+ end loop;
+ return customer;
+end $$;
+
 create function public.crm_run_reminders(run_at timestamptz default now()) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare day date=(run_at at time zone 'Asia/Tokyo')::date; p record; t tasks%rowtype; task_id uuid; desired jsonb='[]'; n jsonb; wanted text[]='{}'; due date; active boolean; skipped jsonb='[]'; count_sent integer=0;
 begin
@@ -388,9 +446,10 @@ revoke all on all functions in schema public from public,anon,authenticated;
 grant usage on schema public to authenticated,service_role;
 grant execute on function public.crm_member() to authenticated;
 grant execute on function public.crm_mutate(jsonb) to authenticated;
+grant execute on function public.crm_import_sansan(jsonb) to authenticated;
 grant execute on function public.crm_run_reminders(timestamptz) to service_role;
 do $$ declare t text; begin
- foreach t in array array['activity_templates','customers','engineers','customer_contacts','customer_engineer_relations','projects','project_engineers','contract_periods','activities','tasks','activity_kinds','activity_contacts','activity_engineers','activity_relations','app_users'] loop
+ foreach t in array array['activity_templates','customers','engineers','customer_contacts','customer_engineer_relations','projects','project_engineers','contract_periods','activities','tasks','activity_kinds','activity_contacts','activity_engineers','activity_relations','app_users','sansan_companies','sansan_people','sansan_cards'] loop
   execute format('alter table public.%I enable row level security',t);
   execute format('create policy member_read on public.%I for select to authenticated using(public.crm_member())',t);
   execute format('grant select on public.%I to authenticated',t);

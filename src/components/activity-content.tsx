@@ -34,7 +34,7 @@ export function ActivityContentEditor({
 }) {
   const id = useId();
   const [template, setTemplate] = useState("");
-  const availableTemplates = templates.filter((t) => !inactive(t));
+  const availableTemplates = templates;
   const selectedTemplate = availableTemplates.find((t) => t.id === template);
   const [preview, setPreview] = useState(defaultPreview || disabled);
   return (

@@ -112,7 +112,7 @@ export function BusinessTable({
           .map((link) => {
             const engineer = w.engineers.find((e) => e.id === link.engineer_id);
             return engineer
-              ? `${engineer.name}${inactive(engineer) ? "（保管済み）" : ""}`
+              ? `${engineer.name}${inactive(engineer) ? "（削除済み）" : ""}`
               : "不明";
           })
           .join("、");

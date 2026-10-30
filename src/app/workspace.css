@@ -792,3 +792,73 @@
   background: #2563eb55;
   outline: none;
 }
+
+.sansan-panel {
+  padding: 24px;
+  overflow: auto;
+  flex: 1;
+}
+.sansan-panel h1 {
+  font-size: 20px;
+  margin: 0 0 8px;
+}
+.sansan-panel h2 {
+  font-size: 17px;
+}
+.sansan-panel h3 {
+  font-size: 15px;
+}
+.sansan-heading,
+.sansan-filters,
+.sansan-row,
+.sansan-contact,
+.sansan-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.sansan-heading {
+  justify-content: space-between;
+}
+.sansan-filters {
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+.sansan-panel input:not([type="checkbox"]),
+.sansan-panel select {
+  padding: 7px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: white;
+}
+.sansan-panel input.sansan-demo-password {
+  width: 240px;
+  max-width: 100%;
+}
+.sansan-row,
+.sansan-contact {
+  padding: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  justify-content: space-between;
+}
+.sansan-row > div,
+.sansan-contact > div {
+  flex: 1;
+}
+.sansan-list,
+.sansan-review {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+.sansan-review {
+  padding: 20px;
+  margin-top: 20px;
+}
+.sansan-actions {
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.sansan-warning {
+  color: #a4470c;
+}

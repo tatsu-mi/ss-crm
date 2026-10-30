@@ -8,7 +8,7 @@
     "start": "next start --hostname 0.0.0.0",
     "share": "node scripts/share.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx tests/domain.test.ts",
+    "test": "node --import tsx tests/domain.test.ts && node --import tsx tests/sansan.test.ts && node --import tsx tests/sansan-fetch.test.ts",
     "test:db": "node --import tsx scripts/test-db.ts",
     "test:e2e": "playwright test",
     "format": "prettier --write src tests scripts next.config.ts playwright.config.ts package.json tsconfig.json vercel.json README.md",

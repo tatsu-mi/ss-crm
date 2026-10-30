@@ -67,7 +67,7 @@ export function EngineerPicker({
               <li key={engineerId}>
                 <span>
                   {name}
-                  {engineer && inactive(engineer) ? "（保管済み）" : ""}
+                  {engineer && inactive(engineer) ? "（削除済み）" : ""}
                 </span>
                 <button
                   type="button"

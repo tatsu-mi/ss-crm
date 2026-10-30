@@ -46,6 +46,7 @@ import { EntityEditor } from "./entity-editor";
 import { BusinessTable } from "./business-table";
 import { CustomerProfile } from "./customer-profile";
 import { ProjectEngineers } from "./project-engineers";
+import { SansanImport } from "./sansan-import";
 export function Crm() {
   const data = useWorkspace();
   if (data.loading)
@@ -62,6 +63,7 @@ export function Crm() {
       userId={data.userId}
       save={data.save}
       reload={data.reload}
+      importDemo={data.importDemo}
       loadError={data.error}
     />
   );
@@ -81,15 +83,22 @@ function WorkspaceView({
   userId,
   save,
   reload,
+  importDemo,
   loadError,
 }: {
   w: Workspace;
   userId: string;
   save: (c: Command) => Promise<void>;
   reload: () => void;
+  importDemo: (
+    company: import("@/lib/sansan").SansanCompany,
+    customerId: string | null,
+    contacts: { personId: string; contactId: string | null }[],
+  ) => Promise<void>;
   loadError: string;
 }) {
   const [settings, setSettings] = useState(false);
+  const [sansan, setSansan] = useState(false);
   const [axis, setAxis] = useState<Axis>("customers"),
     [selected, setSelected] = useState(
       w.customers.find((c) => !c.archived_at)?.id || "",
@@ -119,6 +128,7 @@ function WorkspaceView({
   const date = (value: Value | undefined) =>
     value ? String(value).slice(0, 10).replaceAll("-", "/") : "—";
   function navigate(next: Axis) {
+    setSansan(false);
     setAxis(next);
     setQuery("");
     setRelated(null);
@@ -200,7 +210,7 @@ function WorkspaceView({
   }
   const directory = w.customers.filter(
     (c) =>
-      (showDeleted || !inactive(c)) &&
+      (inactive(c) === showDeleted) &&
       c.name.toLowerCase().includes(query.toLowerCase()) &&
       (!sales || c.sales_user_id === sales) &&
       (!trade || c.trade_status === trade),
@@ -274,14 +284,14 @@ function WorkspaceView({
     w[table].filter(
       (row) =>
         customerOf(w, table, row) === customer?.id &&
-        (showDeleted || !inactive(row)),
+        (inactive(row) === showDeleted),
     );
   const activities = (all = false) =>
     w.activities
       .filter(
         (a) =>
           (all || a.customer_id === customer?.id) &&
-          (showDeleted || !inactive(a)) &&
+          (inactive(a) === showDeleted) &&
           (!kind ||
             w.activity_kinds.find((k) => k.id === a.activity_kind_id)?.name ===
               kind) &&
@@ -366,7 +376,7 @@ function WorkspaceView({
       table,
       w[table].filter(
         (row) =>
-          (showDeleted || !inactive(row)) &&
+          (inactive(row) === showDeleted) &&
           titleOf(row).toLowerCase().includes(query.toLowerCase()) &&
           (axis !== "tasks" || row.assignee_user_id === userId),
       ),
@@ -400,13 +410,19 @@ function WorkspaceView({
           ).map((item) => (
             <button
               key={item.axis}
-              className={axis === item.axis ? "active" : ""}
+              className={!sansan && axis === item.axis ? "active" : ""}
               onClick={() => navigate(item.axis)}
             >
               <item.icon size={15} />
               {item.label}
             </button>
           ))}
+          <button
+            className={sansan ? "active" : ""}
+            onClick={() => setSansan(true)}
+          >
+            Sansan連携
+          </button>
           <button disabled>
             <Folder size={15} />
             ファイル
@@ -481,403 +497,165 @@ function WorkspaceView({
           <button onClick={() => setError("")}>閉じる</button>
         </div>
       )}
-      <div className="workspace" ref={workspace}>
-        <section
-          className="panel directory"
-          role="region"
-          aria-label={axis === "customers" ? "顧客一覧" : `${title}一覧`}
-          style={{ flex: customer ? `0 0 ${ratio}%` : "1" }}
-        >
-          <div className="directory-toolbar">
-            <div className="directory-title">
-              <Building2 size={20} />
-              <h1>{title}</h1>
-              <span className="count">
-                {axis === "customers" ? `${directory.length}件` : ""}
-              </span>
-            </div>
-            <div className="searchbox">
-              <Search size={15} />
-              <input
-                aria-label="名前で検索"
-                placeholder={
-                  axis === "customers" ? "取引先名で検索" : "名前で検索"
-                }
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </div>
-            <button
-              className="button secondary filter-button"
-              aria-expanded={filters}
-              onClick={() => setFilters(!filters)}
-            >
-              <Filter size={15} />
-              詳細絞り込み
-            </button>
-            <div className="spacer" />
-            {axis !== "notifications" && (
+      {sansan ? (
+        <SansanImport w={w} reload={reload} importDemo={importDemo} />
+      ) : (
+        <div className="workspace" ref={workspace}>
+          <section
+            className="panel directory"
+            role="region"
+            aria-label={axis === "customers" ? "顧客一覧" : `${title}一覧`}
+            style={{ flex: customer ? `0 0 ${ratio}%` : "1" }}
+          >
+            <div className="directory-toolbar">
+              <div className="directory-title">
+                <Building2 size={20} />
+                <h1>{title}</h1>
+                <span className="count">
+                  {axis === "customers" ? `${directory.length}件` : ""}
+                </span>
+              </div>
+              <div className="searchbox">
+                <Search size={15} />
+                <input
+                  aria-label="名前で検索"
+                  placeholder={
+                    axis === "customers" ? "取引先名で検索" : "名前で検索"
+                  }
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </div>
               <button
-                className="button primary"
-                onClick={() => openNew(axis as Table)}
+                className="button secondary filter-button"
+                aria-expanded={filters}
+                onClick={() => setFilters(!filters)}
               >
-                <Plus size={15} />
-                新規登録
+                <Filter size={15} />
+                詳細絞り込み
               </button>
-            )}
-          </div>
-          {filters && (
-            <div className="filters">
-              {axis === "customers" && (
-                <>
-                  <label>
-                    進捗状況
-                    <select
-                      aria-label="取引状況で絞り込み"
-                      value={trade}
-                      onChange={(e) => setTrade(e.target.value)}
-                    >
-                      <option value="">すべて</option>
-                      {forms.customers.fields
-                        .find((f) => f.key === "trade_status")!
-                        .options!.map(([v, l]) => (
-                          <option key={v} value={v}>
-                            {l}
+              <div className="spacer" />
+              {axis !== "notifications" && (
+                <button
+                  className="button primary"
+                  onClick={() => openNew(axis as Table)}
+                >
+                  <Plus size={15} />
+                  新規登録
+                </button>
+              )}
+            </div>
+            {filters && (
+              <div className="filters">
+                {axis === "customers" && (
+                  <>
+                    <label>
+                      進捗状況
+                      <select
+                        aria-label="取引状況で絞り込み"
+                        value={trade}
+                        onChange={(e) => setTrade(e.target.value)}
+                      >
+                        <option value="">すべて</option>
+                        {forms.customers.fields
+                          .find((f) => f.key === "trade_status")!
+                          .options!.map(([v, l]) => (
+                            <option key={v} value={v}>
+                              {l}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label>
+                      営業
+                      <select
+                        aria-label="営業で絞り込み"
+                        value={sales}
+                        onChange={(e) => setSales(e.target.value)}
+                      >
+                        <option value="">すべて</option>
+                        {w.users.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.display_name}
                           </option>
                         ))}
-                    </select>
-                  </label>
-                  <label>
-                    営業
-                    <select
-                      aria-label="営業で絞り込み"
-                      value={sales}
-                      onChange={(e) => setSales(e.target.value)}
-                    >
-                      <option value="">すべて</option>
-                      {w.users.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.display_name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </>
-              )}
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={showDeleted}
-                  onChange={(e) => setShowDeleted(e.target.checked)}
+                      </select>
+                    </label>
+                  </>
+                )}
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={showDeleted}
+                    onChange={(e) => setShowDeleted(e.target.checked)}
+                  />
+                  削除済みのみ
+                </label>
+              </div>
+            )}
+            {axis === "customers" ? (
+              <div className="directory-table">
+                <Spreadsheet
+                  label="取引先一覧"
+                  rows={directory}
+                  columns={customerColumns}
+                  rowLabel={(r) => String(r.name)}
+                  onSelect={(row) => {
+                    setSelected(row.id);
+                    setRelated(null);
+                  }}
+                  selectedId={selected}
                 />
-                削除・保管済み
-              </label>
-            </div>
-          )}
-          {axis === "customers" ? (
-            <div className="directory-table">
-              <Spreadsheet
-                label="取引先一覧"
-                rows={directory}
-                columns={customerColumns}
-                rowLabel={(r) => String(r.name)}
-                onSelect={(row) => {
-                  setSelected(row.id);
-                  setRelated(null);
-                }}
-                selectedId={selected}
-              />
-            </div>
-          ) : (
-            <div className="global-sheet">
-              {axis === "activities" && activityTabs}
-              {globalContent()}
-            </div>
-          )}
-        </section>
-        {customer && (
-          <>
-            <div
-              className="splitter"
-              role="separator"
-              aria-label="一覧と詳細の高さ"
-              aria-orientation="horizontal"
-              tabIndex={0}
-              aria-valuemin={25}
-              aria-valuemax={65}
-              aria-valuenow={ratio}
-              onKeyDown={(e) => {
-                if (["Home", "End", "ArrowUp", "ArrowDown"].includes(e.key)) {
-                  e.preventDefault();
-                  setRatio((r) =>
-                    e.key === "Home"
-                      ? 25
-                      : e.key === "End"
-                        ? 65
-                        : Math.max(
-                            25,
-                            Math.min(65, r + (e.key === "ArrowDown" ? 5 : -5)),
-                          ),
-                  );
-                }
-              }}
-              onPointerDown={(e) =>
-                e.currentTarget.setPointerCapture(e.pointerId)
-              }
-              onPointerMove={(e) => {
-                if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-                  const box = workspace.current!.getBoundingClientRect();
-                  setRatio(
-                    Math.max(
-                      25,
-                      Math.min(
-                        65,
-                        Math.round(((e.clientY - box.top) / box.height) * 100),
-                      ),
-                    ),
-                  );
-                }
-              }}
-              onPointerUp={(e) =>
-                e.currentTarget.releasePointerCapture(e.pointerId)
-              }
-            />
-            <div
-              className="detail-workspace"
-              ref={detailWorkspace}
-              style={{
-                gridTemplateColumns: `minmax(0, ${detailRatio}fr) 7px minmax(0, ${100 - detailRatio}fr)`,
-              }}
-            >
-              <section className="panel customer-detail">
-                <header className="customer-heading">
-                  <ChevronDown size={16} />
-                  <h2>{customer.name}</h2>
-                  {customer.website && (
-                    <a
-                      href={
-                        /^https?:\/\//.test(String(customer.website))
-                          ? String(customer.website)
-                          : undefined
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <Link size={15} />
-                      <span>{customer.website}</span>
-                    </a>
-                  )}
-                  {customer.address && (
-                    <span
-                      className="customer-location"
-                      title={String(customer.address)}
-                    >
-                      <MapPin size={15} />
-                      <span>{customer.address}</span>
-                    </span>
-                  )}
-                  <div className="customer-heading-actions">
-                    <button
-                      className="icon-button"
-                      aria-label="取引先を編集"
-                      onClick={() =>
-                        setEdit({ table: "customers", row: customer })
-                      }
-                    >
-                      <PencilLine size={18} />
-                    </button>
-                    <button
-                      className="icon-button"
-                      aria-label="詳細を閉じる"
-                      onClick={() => setSelected("")}
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-                </header>
-                <div className="detail-tabs">
-                  {(
-                    [
-                      { id: "profile", label: "基本情報" },
-                      { id: "contacts", label: "担当者" },
-                      {
-                        id: "projects",
-                        label: `契約（${customerRows("projects").length}）`,
-                      },
-                      { id: "members", label: "参画エンジニア" },
-                      { id: "activities", label: "活動履歴" },
-                      { id: "tasks", label: "タスク" },
-                    ] as const
-                  ).map((item) => (
-                    <button
-                      key={item.id}
-                      className={tab === item.id ? "active" : ""}
-                      onClick={() => setTab(item.id)}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                  <button disabled>ファイル</button>
-                  <div className="spacer" />
-                  <button
-                    className="button primary compact-edit"
-                    onClick={() => {
-                      const first = document.querySelector<HTMLElement>(
-                        '.customer-detail [data-sheet-cell][aria-readonly="false"]',
-                      );
-                      first?.focus();
-                      first?.dispatchEvent(
-                        new KeyboardEvent("keydown", {
-                          key: "Enter",
-                          bubbles: true,
-                        }),
-                      );
-                    }}
-                  >
-                    <PencilLine size={14} />
-                    編集
-                  </button>
-                </div>
-                <div className="detail-content">
-                  {tab === "profile" ? (
-                    <CustomerProfile
-                      w={w}
-                      customer={customer}
-                      save={saveCell}
-                    />
-                  ) : (
-                    <>
-                      {tab === "projects" ? (
-                        <>
-                          <div className="mock-section-heading">
-                            <FileText size={16} />
-                            <h3>契約</h3>
-                            <button
-                              className="button primary"
-                              onClick={() => openNew("projects")}
-                            >
-                              契約を追加
-                            </button>
-                          </div>
-                          {business("projects", customerRows("projects"))}
-                        </>
-                      ) : tab === "members" ? (
-                        <>
-                          <div className="mock-section-heading">
-                            <h3>参画エンジニア・契約期間</h3>
-                          </div>
-                          <ProjectEngineers
-                            w={w}
-                            customerId={customer.id}
-                            saveCell={saveCell}
-                            onContract={(row) =>
-                              setEdit({ table: "projects", row })
-                            }
-                            onEdit={(table, row) =>
-                              table === "project_engineers"
-                                ? openNew("contract_periods", {
-                                    project_engineer_id: row.id,
-                                  })
-                                : setEdit({ table, row })
-                            }
-                            onRenew={renew}
-                            onRelated={(row) =>
-                              linkFilter({ table: "projects", id: row.id })
-                            }
-                          />
-                        </>
-                      ) : (
-                        <>
-                          <div className="mock-section-heading">
-                            <FileText size={16} />
-                            <h3>
-                              {tab === "contacts"
-                                ? "担当者"
-                                : tab === "activities"
-                                  ? "活動履歴"
-                                  : "タスク"}
-                            </h3>
-                            <button
-                              className="button primary"
-                              onClick={() =>
-                                openNew(
-                                  tab === "contacts"
-                                    ? "customer_contacts"
-                                    : tab === "activities"
-                                      ? "activities"
-                                      : "tasks",
-                                )
-                              }
-                            >
-                              追加
-                            </button>
-                          </div>
-                          {business(
-                            tab === "contacts"
-                              ? "customer_contacts"
-                              : tab === "activities"
-                                ? "activities"
-                                : "tasks",
-                            customerRows(
-                              tab === "contacts"
-                                ? "customer_contacts"
-                                : tab === "activities"
-                                  ? "activities"
-                                  : "tasks",
-                            ),
-                          )}
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
-              </section>
+              </div>
+            ) : (
+              <div className="global-sheet">
+                {axis === "activities" && activityTabs}
+                {globalContent()}
+              </div>
+            )}
+          </section>
+          {customer && (
+            <>
               <div
-                className="detail-splitter"
+                className="splitter"
                 role="separator"
-                aria-label="取引先詳細と活動の幅"
-                aria-orientation="vertical"
-                aria-valuemin={25}
-                aria-valuemax={75}
-                aria-valuenow={detailRatio}
+                aria-label="一覧と詳細の高さ"
+                aria-orientation="horizontal"
                 tabIndex={0}
+                aria-valuemin={25}
+                aria-valuemax={65}
+                aria-valuenow={ratio}
                 onKeyDown={(e) => {
-                  if (
-                    ["Home", "End", "ArrowLeft", "ArrowRight"].includes(e.key)
-                  ) {
+                  if (["Home", "End", "ArrowUp", "ArrowDown"].includes(e.key)) {
                     e.preventDefault();
-                    setDetailRatio((r) =>
+                    setRatio((r) =>
                       e.key === "Home"
                         ? 25
                         : e.key === "End"
-                          ? 75
+                          ? 65
                           : Math.max(
                               25,
                               Math.min(
-                                75,
-                                r + (e.key === "ArrowRight" ? 5 : -5),
+                                65,
+                                r + (e.key === "ArrowDown" ? 5 : -5),
                               ),
                             ),
                     );
                   }
                 }}
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  e.currentTarget.setPointerCapture(e.pointerId);
-                }}
+                onPointerDown={(e) =>
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                }
                 onPointerMove={(e) => {
                   if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-                    const box =
-                      detailWorkspace.current!.getBoundingClientRect();
-                    const available = box.width - 7;
-                    if (available <= 0) return;
-                    setDetailRatio(
+                    const box = workspace.current!.getBoundingClientRect();
+                    setRatio(
                       Math.max(
                         25,
                         Math.min(
-                          75,
+                          65,
                           Math.round(
-                            ((e.clientX - box.left - 3.5) / available) * 100,
+                            ((e.clientY - box.top) / box.height) * 100,
                           ),
                         ),
                       ),
@@ -888,37 +666,284 @@ function WorkspaceView({
                   e.currentTarget.releasePointerCapture(e.pointerId)
                 }
               />
-              <section className="panel activity-panel">
-                <div className="activity-head">
-                  <h2>
-                    <ContactRound size={19} />
-                    活動
-                  </h2>
-                  {activityTabs}
-                  <button
-                    className="button primary"
-                    onClick={() => openNew("activities")}
-                  >
-                    <Plus size={14} />
-                    活動を追加
-                  </button>
-                </div>
-                {related && (
-                  <div className="related-filter">
-                    <span>関連する活動</span>
-                    <button onClick={() => setRelated(null)}>
-                      絞り込みを解除
+              <div
+                className="detail-workspace"
+                ref={detailWorkspace}
+                style={{
+                  gridTemplateColumns: `minmax(0, ${detailRatio}fr) 7px minmax(0, ${100 - detailRatio}fr)`,
+                }}
+              >
+                <section className="panel customer-detail">
+                  <header className="customer-heading">
+                    <ChevronDown size={16} />
+                    <h2>{customer.name}</h2>
+                    {customer.website && (
+                      <a
+                        href={
+                          /^https?:\/\//.test(String(customer.website))
+                            ? String(customer.website)
+                            : undefined
+                        }
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <Link size={15} />
+                        <span>{customer.website}</span>
+                      </a>
+                    )}
+                    {customer.address && (
+                      <span
+                        className="customer-location"
+                        title={String(customer.address)}
+                      >
+                        <MapPin size={15} />
+                        <span>{customer.address}</span>
+                      </span>
+                    )}
+                    <div className="customer-heading-actions">
+                      <button
+                        className="icon-button"
+                        aria-label="取引先を編集"
+                        onClick={() =>
+                          setEdit({ table: "customers", row: customer })
+                        }
+                      >
+                        <PencilLine size={18} />
+                      </button>
+                      <button
+                        className="icon-button"
+                        aria-label="詳細を閉じる"
+                        onClick={() => setSelected("")}
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
+                  </header>
+                  <div className="detail-tabs">
+                    {(
+                      [
+                        { id: "profile", label: "基本情報" },
+                        { id: "contacts", label: "担当者" },
+                        {
+                          id: "projects",
+                          label: `契約（${customerRows("projects").length}）`,
+                        },
+                        { id: "members", label: "参画エンジニア" },
+                        { id: "activities", label: "活動履歴" },
+                        { id: "tasks", label: "タスク" },
+                      ] as const
+                    ).map((item) => (
+                      <button
+                        key={item.id}
+                        className={tab === item.id ? "active" : ""}
+                        onClick={() => setTab(item.id)}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                    <button disabled>ファイル</button>
+                    <div className="spacer" />
+                    <button
+                      className="button primary compact-edit"
+                      onClick={() => {
+                        const first = document.querySelector<HTMLElement>(
+                          '.customer-detail [data-sheet-cell][aria-readonly="false"]',
+                        );
+                        first?.focus();
+                        first?.dispatchEvent(
+                          new KeyboardEvent("keydown", {
+                            key: "Enter",
+                            bubbles: true,
+                          }),
+                        );
+                      }}
+                    >
+                      <PencilLine size={14} />
+                      編集
                     </button>
                   </div>
-                )}
-                <div className="activity-content">
-                  {business("activities", activities())}
-                </div>
-              </section>
-            </div>
-          </>
-        )}
-      </div>
+                  <div className="detail-content">
+                    {tab === "profile" ? (
+                      <CustomerProfile
+                        w={w}
+                        customer={customer}
+                        save={saveCell}
+                      />
+                    ) : (
+                      <>
+                        {tab === "projects" ? (
+                          <>
+                            <div className="mock-section-heading">
+                              <FileText size={16} />
+                              <h3>契約</h3>
+                              <button
+                                className="button primary"
+                                onClick={() => openNew("projects")}
+                              >
+                                契約を追加
+                              </button>
+                            </div>
+                            {business("projects", customerRows("projects"))}
+                          </>
+                        ) : tab === "members" ? (
+                          <>
+                            <div className="mock-section-heading">
+                              <h3>参画エンジニア・契約期間</h3>
+                            </div>
+                            <ProjectEngineers
+                              w={w}
+                              customerId={customer.id}
+                              saveCell={saveCell}
+                              onContract={(row) =>
+                                setEdit({ table: "projects", row })
+                              }
+                              onEdit={(table, row) =>
+                                table === "project_engineers"
+                                  ? openNew("contract_periods", {
+                                      project_engineer_id: row.id,
+                                    })
+                                  : setEdit({ table, row })
+                              }
+                              onRenew={renew}
+                              onRelated={(row) =>
+                                linkFilter({ table: "projects", id: row.id })
+                              }
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <div className="mock-section-heading">
+                              <FileText size={16} />
+                              <h3>
+                                {tab === "contacts"
+                                  ? "担当者"
+                                  : tab === "activities"
+                                    ? "活動履歴"
+                                    : "タスク"}
+                              </h3>
+                              <button
+                                className="button primary"
+                                onClick={() =>
+                                  openNew(
+                                    tab === "contacts"
+                                      ? "customer_contacts"
+                                      : tab === "activities"
+                                        ? "activities"
+                                        : "tasks",
+                                  )
+                                }
+                              >
+                                追加
+                              </button>
+                            </div>
+                            {business(
+                              tab === "contacts"
+                                ? "customer_contacts"
+                                : tab === "activities"
+                                  ? "activities"
+                                  : "tasks",
+                              customerRows(
+                                tab === "contacts"
+                                  ? "customer_contacts"
+                                  : tab === "activities"
+                                    ? "activities"
+                                    : "tasks",
+                              ),
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </section>
+                <div
+                  className="detail-splitter"
+                  role="separator"
+                  aria-label="取引先詳細と活動の幅"
+                  aria-orientation="vertical"
+                  aria-valuemin={25}
+                  aria-valuemax={75}
+                  aria-valuenow={detailRatio}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (
+                      ["Home", "End", "ArrowLeft", "ArrowRight"].includes(e.key)
+                    ) {
+                      e.preventDefault();
+                      setDetailRatio((r) =>
+                        e.key === "Home"
+                          ? 25
+                          : e.key === "End"
+                            ? 75
+                            : Math.max(
+                                25,
+                                Math.min(
+                                  75,
+                                  r + (e.key === "ArrowRight" ? 5 : -5),
+                                ),
+                              ),
+                      );
+                    }
+                  }}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                  }}
+                  onPointerMove={(e) => {
+                    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                      const box =
+                        detailWorkspace.current!.getBoundingClientRect();
+                      const available = box.width - 7;
+                      if (available <= 0) return;
+                      setDetailRatio(
+                        Math.max(
+                          25,
+                          Math.min(
+                            75,
+                            Math.round(
+                              ((e.clientX - box.left - 3.5) / available) * 100,
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+                  }}
+                  onPointerUp={(e) =>
+                    e.currentTarget.releasePointerCapture(e.pointerId)
+                  }
+                />
+                <section className="panel activity-panel">
+                  <div className="activity-head">
+                    <h2>
+                      <ContactRound size={19} />
+                      活動
+                    </h2>
+                    {activityTabs}
+                    <button
+                      className="button primary"
+                      onClick={() => openNew("activities")}
+                    >
+                      <Plus size={14} />
+                      活動を追加
+                    </button>
+                  </div>
+                  {related && (
+                    <div className="related-filter">
+                      <span>関連する活動</span>
+                      <button onClick={() => setRelated(null)}>
+                        絞り込みを解除
+                      </button>
+                    </div>
+                  )}
+                  <div className="activity-content">
+                    {business("activities", activities())}
+                  </div>
+                </section>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       {settings && (
         <TemplateSettings
           w={w}

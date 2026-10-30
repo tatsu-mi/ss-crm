@@ -51,11 +51,15 @@ const customer = () => ref("customer_id", "顧客", "customers", true);
 const sales = () => ref("sales_user_id", "営業", "users");
 export const forms: Record<
   Table,
-  { label: string; lifecycle: "archived_at" | "deleted_at"; fields: Input[] }
+  {
+    label: string;
+    lifecycle: "archived_at" | "deleted_at" | null;
+    fields: Input[];
+  }
 > = {
   activity_templates: {
     label: "活動テンプレート",
-    lifecycle: "deleted_at",
+    lifecycle: null,
     fields: [
       text("name", "テンプレート名", true),
       { key: "body", label: "内容", type: "textarea", required: true },
@@ -200,8 +204,9 @@ export function newRow(
     version: 0,
     created_at: now,
     updated_at: now,
-    [forms[table].lifecycle]: null,
   };
+  const lifecycle = forms[table].lifecycle;
+  if (lifecycle) row[lifecycle] = null;
   for (const f of forms[table].fields)
     row[f.key] =
       f.type === "checkbox" ? false : f.options ? f.options[0][0] : null;

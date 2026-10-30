@@ -108,6 +108,63 @@ test("customer edits, versions, history and lifecycle", () => {
   );
   assert.equal(w.customers[0].archived_at, null);
 });
+test("permanent deletion cascades only from deleted records", () => {
+  let w = demoWorkspace();
+  const customer = w.customers[0];
+  const unknownRevision = {
+    ...w.revisions[0],
+    id: newId(),
+    entity_table: "unknown" as Table,
+    entity_id: w.engineers[0].id,
+    snapshot: { row: w.engineers[0] },
+  };
+  const deletedRevision = {
+    ...unknownRevision,
+    id: newId(),
+    entity_id: customer.id,
+    snapshot: { row: customer },
+  };
+  w.revisions.push(unknownRevision, deletedRevision);
+  const command: Command = {
+    kind: "purge",
+    table: "customers",
+    id: customer.id,
+    expected_version: customer.version,
+  };
+  assert.throws(() => applyCommand(w, command, w.users[0].id), /削除済み/);
+  const engineerIds = w.engineers.map((e) => e.id);
+  const projects = w.projects
+    .filter((p) => p.customer_id === customer.id)
+    .map((p) => p.id);
+  w = applyCommand(
+    w,
+    {
+      kind: "lifecycle",
+      table: "customers",
+      id: customer.id,
+      expected_version: customer.version,
+      restore: false,
+    },
+    w.users[0].id,
+  );
+  w = applyCommand(
+    w,
+    { ...command, expected_version: customer.version + 1 },
+    w.users[0].id,
+  );
+  assert.ok(!w.customers.some((c) => c.id === customer.id));
+  assert.ok(!w.projects.some((p) => projects.includes(p.id)));
+  assert.ok(!w.customer_contacts.some((c) => c.customer_id === customer.id));
+  assert.ok(!w.activities.some((a) => a.customer_id === customer.id));
+  assert.ok(!w.tasks.some((t) => t.customer_id === customer.id));
+  assert.ok(w.revisions.some((r) => r.id === unknownRevision.id));
+  assert.ok(!w.revisions.some((r) => r.id === deletedRevision.id));
+  assert.deepEqual(
+    w.engineers.map((e) => e.id),
+    engineerIds,
+  );
+  validateWorkspace(w);
+});
 test("contract renewal preserves conditions and rejects overlap including restoration", () => {
   let w = demoWorkspace();
   const p = w.contract_periods[0];
@@ -639,35 +696,37 @@ test("managed templates retain Markdown snapshots, reject stale edits and leave 
         }),
       /内容/,
     );
-  const changeLifecycle = (restore: boolean) => {
-    const current = w.activity_templates.find((t) => t.id === saved.id)!;
-    return applyCommand(
-      w,
-      {
-        kind: "lifecycle",
-        table: "activity_templates",
-        id: saved.id,
-        expected_version: current.version,
-        restore,
-      },
-      actor,
-    );
-  };
-  w = changeLifecycle(false);
-  assert.ok(w.activity_templates.find((t) => t.id === saved.id)!.deleted_at);
+  const current = w.activity_templates.find((t) => t.id === saved.id)!;
   assert.throws(
     () =>
-      save(
+      applyCommand(
         w,
-        "activity_templates",
-        w.activity_templates.find((t) => t.id === saved.id)!,
+        {
+          kind: "purge",
+          table: "activity_templates",
+          id: saved.id,
+          expected_version: saved.version,
+        },
+        actor,
       ),
-    /復元/,
+    /他の利用者/,
   );
-  w = changeLifecycle(true);
-  assert.equal(
-    w.activity_templates.find((t) => t.id === saved.id)!.deleted_at,
-    null,
+  w = applyCommand(
+    w,
+    {
+      kind: "purge",
+      table: "activity_templates",
+      id: saved.id,
+      expected_version: current.version,
+    },
+    actor,
+  );
+  assert.ok(!w.activity_templates.some((t) => t.id === saved.id));
+  assert.ok(
+    !w.revisions.some(
+      (r) =>
+        r.entity_table === "activity_templates" && r.entity_id === saved.id,
+    ),
   );
   assert.equal(w.activities[0].body, saved.body);
 });

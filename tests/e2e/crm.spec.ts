@@ -1059,6 +1059,7 @@ test("settings manage reusable activity templates and preserve previously insert
     .last()
     .click();
   settings = await openSettings();
+  page.once("dialog", (d) => d.accept());
   await settings
     .getByRole("button", { name: "定例会（改訂版）を削除", exact: true })
     .click();
@@ -1077,26 +1078,65 @@ test("settings manage reusable activity templates and preserve previously insert
       .getByRole("option", { name: "定例会（改訂版）", exact: true }),
   ).toHaveCount(0);
   await dialog.getByRole("button", { name: "キャンセル", exact: true }).click();
-  settings = await openSettings();
-  await settings.getByLabel("削除済みを表示", { exact: true }).check();
-  await settings
-    .getByRole("button", { name: "定例会（改訂版）を復元", exact: true })
-    .click();
-  await expect(
-    settings.getByRole("button", { name: "定例会（改訂版）", exact: true }),
-  ).toBeVisible();
-  await settings
-    .getByRole("button", { name: "閉じる", exact: true })
-    .last()
-    .click();
   await page.reload();
-  await page.getByRole("button", { name: "活動を追加", exact: true }).click();
+  await grid(page, "活動一覧")
+    .getByRole("button", {
+      name: "テンプレートで入力した活動の内容を表示",
+      exact: true,
+    })
+    .click();
   dialog = page.getByRole("dialog");
-  await dialog
-    .getByLabel("テンプレート", { exact: true })
-    .selectOption({ label: "定例会（改訂版）" });
-  await dialog.getByRole("button", { name: "挿入する", exact: true }).click();
   await expect(
-    dialog.getByLabel("内容（Markdown）", { exact: true }),
-  ).toHaveValue("## 次回の議題");
+    dialog.getByRole("heading", { name: "定例会", exact: true }),
+  ).toBeVisible();
+});
+
+test("deleted customer can be permanently deleted after a scope warning", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(grid(page, "取引先一覧")).toBeVisible();
+  await page.evaluate(() => {
+    const key = "nexus-crm-demo-v6";
+    const w = JSON.parse(localStorage.getItem(key)!);
+    const customer = w.customers.find(
+      (c: { name: string }) => c.name === "株式会社BLUEPRINT",
+    );
+    const engineerRevision = w.revisions.find(
+      (r: { entity_table: string }) => r.entity_table === "engineers",
+    );
+    w.revisions.push({
+      ...engineerRevision,
+      id: crypto.randomUUID(),
+      entity_table: "legacy_table",
+    });
+    customer.archived_at = new Date().toISOString();
+    localStorage.setItem(key, JSON.stringify(w));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "詳細絞り込み" }).click();
+  await page.getByLabel("削除済みのみ", { exact: true }).check();
+  await expect(
+    grid(page, "取引先一覧").getByRole("button", { name: /を編集$/ }),
+  ).toHaveCount(1);
+  await grid(page, "取引先一覧")
+    .getByRole("button", { name: "株式会社BLUEPRINTを編集" })
+    .click();
+  let warning = "";
+  page.once("dialog", (d) => {
+    warning = d.message();
+    void d.dismiss();
+  });
+  await page.getByRole("button", { name: "完全に削除", exact: true }).click();
+  expect(warning).toContain("契約");
+  expect(warning).toContain("復元できません");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "完全に削除", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    grid(page, "取引先一覧").getByRole("button", {
+      name: "株式会社BLUEPRINTを編集",
+    }),
+  ).toHaveCount(0);
 });

@@ -13,6 +13,7 @@ import { projectCopyDefaults, projectCopyCommand } from "@/lib/project-copy";
 import { Dialog } from "./dialog";
 import { ActivityContentEditor, MarkdownContent } from "./activity-content";
 import { EngineerPicker } from "./engineer-picker";
+import { purgeWarning } from "@/lib/purge-warning";
 export function EntityEditor({
   w,
   table,
@@ -313,7 +314,7 @@ export function EntityEditor({
                     .map((e) => (
                       <option key={e.id} value={e.id}>
                         {e.name}
-                        {inactive(e) ? "（保管済み）" : ""}
+                        {inactive(e) ? "（削除済み）" : ""}
                       </option>
                     ))}
                 </select>
@@ -529,32 +530,41 @@ export function EntityEditor({
         </div>
         <footer className="dialog-footer">
           <div>
-            {!!initial.version && (
+            {archived && (
               <button
                 type="button"
                 className="text-button danger"
                 disabled={busy}
                 onClick={() => {
-                  if (
-                    archived ||
-                    window.confirm(
-                      `${forms[table].label}を${forms[table].lifecycle === "archived_at" ? "保管" : "削除"}しますか？`,
-                    )
-                  )
+                  if (window.confirm(purgeWarning(table)))
+                    void submit({
+                      kind: "purge",
+                      table,
+                      id: initial.id,
+                      expected_version: initial.version,
+                    });
+                }}
+              >
+                完全に削除
+              </button>
+            )}
+            {!!initial.version && !archived && (
+              <button
+                type="button"
+                className="text-button danger"
+                disabled={busy}
+                onClick={() => {
+                  if (window.confirm(`${forms[table].label}を削除しますか？`))
                     void submit({
                       kind: "lifecycle",
                       table,
                       id: initial.id,
                       expected_version: initial.version,
-                      restore: archived,
+                      restore: false,
                     });
                 }}
               >
-                {archived
-                  ? "復元する"
-                  : forms[table].lifecycle === "archived_at"
-                    ? "保管する"
-                    : "削除"}
+                削除
               </button>
             )}
           </div>
@@ -567,6 +577,24 @@ export function EntityEditor({
             >
               キャンセル
             </button>
+            {archived && (
+              <button
+                type="button"
+                className="button primary"
+                disabled={busy}
+                onClick={() =>
+                  void submit({
+                    kind: "lifecycle",
+                    table,
+                    id: initial.id,
+                    expected_version: initial.version,
+                    restore: true,
+                  })
+                }
+              >
+                復元する
+              </button>
+            )}
             {!archived && (
               <button type="submit" className="button primary" disabled={busy}>
                 {busy ? "保存中…" : "保存する"}
